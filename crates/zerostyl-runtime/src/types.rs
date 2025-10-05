@@ -27,22 +27,18 @@ pub struct ZkProof {
 }
 
 impl ZkProof {
-    /// Creates a new ZkProof from raw bytes
     pub fn new(proof_data: Vec<u8>) -> Self {
         Self { proof_data }
     }
 
-    /// Returns the size of the proof in bytes
     pub fn size(&self) -> usize {
         self.proof_data.len()
     }
 
-    /// Returns a reference to the raw proof data
     pub fn as_bytes(&self) -> &[u8] {
         &self.proof_data
     }
 
-    /// Consumes the proof and returns the raw bytes
     pub fn into_bytes(self) -> Vec<u8> {
         self.proof_data
     }
@@ -71,17 +67,14 @@ pub struct Commitment {
 }
 
 impl Commitment {
-    /// Creates a new Commitment with the given value and randomness
     pub fn new(value: Vec<u8>, randomness: Vec<u8>) -> Self {
         Self { value, randomness }
     }
 
-    /// Returns a reference to the committed value
     pub fn value(&self) -> &[u8] {
         &self.value
     }
 
-    /// Returns a reference to the randomness
     pub fn randomness(&self) -> &[u8] {
         &self.randomness
     }
@@ -110,17 +103,14 @@ pub struct CircuitConfig {
 }
 
 impl CircuitConfig {
-    /// Creates a new CircuitConfig with the specified parameters
     pub fn new(k: u32, custom_params: Vec<(String, String)>) -> Self {
         Self { k, custom_params }
     }
 
-    /// Creates a minimal CircuitConfig with only the k parameter
     pub fn minimal(k: u32) -> Self {
         Self { k, custom_params: Vec::new() }
     }
 
-    /// Returns the k parameter (circuit has 2^k rows)
     pub fn k(&self) -> u32 {
         self.k
     }
@@ -130,12 +120,10 @@ impl CircuitConfig {
         1 << self.k
     }
 
-    /// Returns a reference to the custom parameters
     pub fn custom_params(&self) -> &[(String, String)] {
         &self.custom_params
     }
 
-    /// Adds a custom parameter to the configuration
     pub fn add_param(&mut self, key: String, value: String) {
         self.custom_params.push((key, value));
     }

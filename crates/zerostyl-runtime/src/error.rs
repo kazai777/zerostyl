@@ -46,22 +46,18 @@ pub enum ZeroStylError {
 }
 
 impl ZeroStylError {
-    /// Creates a new InvalidProof error
     pub fn invalid_proof(msg: impl Into<String>) -> Self {
         Self::InvalidProof(msg.into())
     }
 
-    /// Creates a new CompilationError
     pub fn compilation_error(msg: impl Into<String>) -> Self {
         Self::CompilationError(msg.into())
     }
 
-    /// Creates a new SerializationError
     pub fn serialization_error(msg: impl Into<String>) -> Self {
         Self::SerializationError(msg.into())
     }
 
-    /// Creates a new Other error
     pub fn other(msg: impl Into<String>) -> Self {
         Self::Other(msg.into())
     }

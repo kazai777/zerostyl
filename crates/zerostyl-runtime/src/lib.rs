@@ -17,14 +17,12 @@ mod tests {
 
     #[test]
     fn test_zkproof_basic_constructor() {
-        // Test that ZkProof constructor works with empty bytes
         let proof = ZkProof::new(vec![]);
         assert_eq!(proof.size(), 0);
     }
 
     #[test]
     fn test_commitment_debug_trait() {
-        // Test that Commitment implements Debug trait
         let commitment = Commitment::new(vec![1], vec![2]);
         let debug_str = format!("{:?}", commitment);
         assert!(debug_str.contains("Commitment"));
@@ -32,7 +30,6 @@ mod tests {
 
     #[test]
     fn test_circuit_config_debug_trait() {
-        // Test that CircuitConfig implements Debug trait
         let config = CircuitConfig::minimal(10);
         let debug_str = format!("{:?}", config);
         assert!(debug_str.contains("CircuitConfig"));
@@ -40,7 +37,6 @@ mod tests {
 
     #[test]
     fn test_zkproof_equality() {
-        // Test that ZkProof implements PartialEq correctly
         let proof1 = ZkProof::new(vec![1, 2, 3]);
         let proof2 = ZkProof::new(vec![1, 2, 3]);
         let proof3 = ZkProof::new(vec![4, 5, 6]);
@@ -51,7 +47,6 @@ mod tests {
 
     #[test]
     fn test_commitment_equality() {
-        // Test that Commitment implements PartialEq correctly
         let comm1 = Commitment::new(vec![1], vec![2]);
         let comm2 = Commitment::new(vec![1], vec![2]);
         let comm3 = Commitment::new(vec![3], vec![4]);
@@ -62,7 +57,6 @@ mod tests {
 
     #[test]
     fn test_circuit_config_equality() {
-        // Test that CircuitConfig implements PartialEq correctly
         let config1 = CircuitConfig::minimal(15);
         let config2 = CircuitConfig::minimal(15);
         let config3 = CircuitConfig::minimal(16);

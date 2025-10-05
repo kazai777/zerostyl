@@ -4,7 +4,6 @@ use zerostyl_runtime::{CircuitConfig, Commitment, ZkProof};
 
 #[test]
 fn test_zkproof_creation() {
-    // Test that we can create a ZkProof from raw bytes
     let proof_bytes = vec![1, 2, 3, 4, 5];
     let proof = ZkProof::new(proof_bytes.clone());
 
@@ -14,7 +13,6 @@ fn test_zkproof_creation() {
 
 #[test]
 fn test_zkproof_into_bytes() {
-    // Test that we can consume the proof and get back the original bytes
     let proof_bytes = vec![10, 20, 30, 40];
     let proof = ZkProof::new(proof_bytes.clone());
 
@@ -24,14 +22,11 @@ fn test_zkproof_into_bytes() {
 
 #[test]
 fn test_zkproof_serialization() {
-    // Test that ZkProof can be serialized to and from JSON
     let proof_bytes = vec![0xDE, 0xAD, 0xBE, 0xEF];
     let proof = ZkProof::new(proof_bytes);
 
-    // Serialize to JSON
     let json = serde_json::to_string(&proof).expect("Failed to serialize proof");
 
-    // Deserialize back
     let deserialized: ZkProof = serde_json::from_str(&json).expect("Failed to deserialize proof");
 
     assert_eq!(deserialized.as_bytes(), &[0xDE, 0xAD, 0xBE, 0xEF]);
@@ -39,7 +34,6 @@ fn test_zkproof_serialization() {
 
 #[test]
 fn test_zkproof_clone() {
-    // Test that ZkProof can be cloned correctly
     let proof_bytes = vec![1, 2, 3];
     let proof1 = ZkProof::new(proof_bytes);
     let proof2 = proof1.clone();
@@ -49,7 +43,6 @@ fn test_zkproof_clone() {
 
 #[test]
 fn test_commitment_creation() {
-    // Test that we can create a Commitment with value and randomness
     let value = vec![100, 200];
     let randomness = vec![50, 75];
 
@@ -61,7 +54,6 @@ fn test_commitment_creation() {
 
 #[test]
 fn test_commitment_serialization() {
-    // Test that Commitment can be serialized to and from JSON
     let commitment = Commitment::new(vec![1, 2, 3], vec![4, 5, 6]);
 
     let json = serde_json::to_string(&commitment).expect("Failed to serialize commitment");
@@ -74,7 +66,6 @@ fn test_commitment_serialization() {
 
 #[test]
 fn test_commitment_clone() {
-    // Test that Commitment can be cloned correctly
     let commitment1 = Commitment::new(vec![10, 20], vec![30, 40]);
     let commitment2 = commitment1.clone();
 
@@ -84,7 +75,6 @@ fn test_commitment_clone() {
 
 #[test]
 fn test_circuit_config_minimal() {
-    // Test creating a minimal CircuitConfig with only k parameter
     let config = CircuitConfig::minimal(17);
 
     assert_eq!(config.k(), 17);
@@ -94,7 +84,6 @@ fn test_circuit_config_minimal() {
 
 #[test]
 fn test_circuit_config_with_params() {
-    // Test creating a CircuitConfig with custom parameters
     let params = vec![
         ("max_transfers".to_string(), "10".to_string()),
         ("batch_size".to_string(), "5".to_string()),
@@ -110,7 +99,6 @@ fn test_circuit_config_with_params() {
 
 #[test]
 fn test_circuit_config_add_param() {
-    // Test adding parameters to an existing config
     let mut config = CircuitConfig::minimal(15);
 
     config.add_param("timeout".to_string(), "30".to_string());
@@ -120,7 +108,6 @@ fn test_circuit_config_add_param() {
 
 #[test]
 fn test_circuit_config_serialization() {
-    // Test that CircuitConfig can be serialized and deserialized
     let config = CircuitConfig::new(18, vec![("privacy_level".to_string(), "high".to_string())]);
 
     let json = serde_json::to_string(&config).expect("Failed to serialize config");
@@ -133,7 +120,6 @@ fn test_circuit_config_serialization() {
 
 #[test]
 fn test_circuit_config_clone() {
-    // Test that CircuitConfig can be cloned
     let config1 = CircuitConfig::minimal(16);
     let config2 = config1.clone();
 
