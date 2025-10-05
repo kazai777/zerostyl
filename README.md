@@ -1,6 +1,7 @@
-# ZeroStyl 🔐
+# ZeroStyl
 
-[![Build Status](https://img.shields.io/github/actions/workflow/status/kazai777/zerostyl/ci.yml?branch=main)](https://github.com/kazai777/ZeroStyl/actions)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/kazai777/zerostyl/ci.yml?branch=main)](https://github.com/kazai777/zerostyl/actions)
+[![Coverage](https://github.com/kazai777/zerostyl/workflows/Coverage/badge.svg)](https://github.com/kazai777/zerostyl/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Rust Version](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org)
 [![Arbitrum Stylus](https://img.shields.io/badge/Arbitrum-Stylus-blue)](https://arbitrum.io/stylus)
@@ -9,62 +10,122 @@
 
 ---
 
-## 📖 Description
+## Description
 
-**ZeroStyl** is a comprehensive toolkit for building privacy-preserving smart contracts on Arbitrum Stylus using zero-knowledge proofs (zk-SNARKs). It bridges the gap between cryptographic theory and practical Web3 development by providing Rust-native tools specifically designed for the Stylus environment.
+**ZeroStyl** is an open-source Rust toolkit for building privacy-preserving smart contracts on **Arbitrum Stylus** using zero-knowledge proofs (zk-SNARKs).
 
-Despite the proven benefits of zero-knowledge cryptography for privacy and scalability, **only 20% of Web3 developers** have adopted zk technologies due to steep learning curves, complex tooling, and limited integration with modern smart contract platforms. ZeroStyl addresses these challenges by offering a streamlined development experience that makes privacy-first applications accessible to all Rust developers.
+### The Challenge
 
-Our mission is to **reduce zk-SNARK development time by 50%** and **boost privacy adoption by 30%** within the Arbitrum ecosystem, empowering developers to build the next generation of private, scalable decentralized applications.
+Zero-knowledge cryptography offers powerful privacy guarantees, but integration complexity remains a major barrier for smart contract developers. Existing tools require deep cryptographic expertise and lack native support for modern platforms like Arbitrum Stylus.
+
+### Our Solution
+
+**ZeroStyl** bridges this gap by providing Rust-native tools specifically designed for Stylus (WASM-based smart contracts with 10x EVM performance):
+
+- **Automated circuit compilation** from high-level Rust code
+- **Developer-friendly debugging** with zk-mocking capabilities
+- **Privacy-safe ABI generation** for seamless frontend integration
+
+By simplifying the zk-SNARK development workflow, **ZeroStyl** makes privacy-first applications accessible to all Rust developers.
 
 ---
 
-## ✨ Features
+## Features
 
 ZeroStyl consists of three integrated components designed to cover the entire privacy development workflow:
 
-### 🔧 **zk-Compiler**
-Compiles halo2 zk-SNARK circuits to WASM bytecode optimized for Arbitrum Stylus contracts. Seamlessly integrates cryptographic proofs into your smart contract logic with minimal overhead.
+### **zk-Compiler**
 
-### 🐛 **Privacy Debugger**
+Compiles halo2 zk-SNARK circuits to WASM bytecode optimized for Arbitrum Stylus.
+
+**Included Circuits:**
+- `tx_privacy`: Transaction privacy using Pedersen commitments and Merkle proofs (depth 32)
+- `state_mask`: State masking with range proofs and comparison gates
+
+**Target performance:** <100ms proof generation
+
+### **Privacy Debugger**
+
 Debug privacy-preserving applications with zk-mocking capabilities. Inspect circuit constraints, witness values, and proof generation without compromising sensitive data during development.
 
-### 📦 **ABI Exporter**
+### **ABI Exporter**
+
 Generates privacy-safe Application Binary Interfaces (ABIs) for zk-powered Stylus contracts, ensuring seamless integration with frontend applications and tooling while maintaining zero-knowledge guarantees.
 
 ---
 
-## 🚀 Quick Start
+## Use Cases
 
-### Installation
+ZeroStyl enables privacy-preserving applications across DeFi, gaming, and beyond:
 
-Add ZeroStyl to your Rust project:
+**Private DeFi**
+- Confidential lending (hide collateral amounts from liquidation bots)
+- Anonymous token swaps (dark pool trading like Renegade)
+- Private DAO voting (prove token holdings without revealing balance)
 
-```bash
-cargo add zerostyl-compiler
-cargo add zerostyl-runtime
-```
+**Privacy-First Gaming**
+- Hidden player stats and inventories
+- Confidential in-game transactions
+- Private matchmaking and rankings
 
-### Basic Example
-
-```rust
-use zerostyl_runtime::{CircuitConfig, ZkProof};
-use zerostyl_compiler::Compiler;
-
-fn main() {
-    // Configure your zk-SNARK circuit
-    let config = CircuitConfig::minimal(17); // 2^17 rows
-
-    // TODO: Compile circuit and generate proof
-    // (Full examples coming in Milestone 1)
-
-    println!("ZeroStyl is ready! 🔐");
-}
-```
+**Compliance & KYC**
+- Prove regulatory compliance without revealing identity
+- Selective disclosure of credentials
+- Privacy-preserving audit trails
 
 ---
 
-## 📊 Project Status
+## Quick Start
+
+### Prerequisites
+
+- **Rust 1.70+** ([install from rustup.rs](https://rustup.rs/))
+- **Git**
+
+### Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/kazai777/zerostyl.git
+cd zerostyl
+
+# Run setup script (installs tools, builds workspace, runs tests)
+./scripts/setup.sh
+
+# Verify installation
+./scripts/check.sh
+```
+
+### Current Status
+
+The project is currently in **Phase 0 - Infrastructure ✅** (completed).
+
+The `zerostyl-runtime` crate is functional and ready to use:
+
+```rust
+use zerostyl_runtime::{ZkProof, Commitment, CircuitConfig};
+
+// Create a zero-knowledge proof
+let proof = ZkProof::new(vec![1, 2, 3, 4]);
+println!("Proof size: {} bytes", proof.size());
+
+// Create a Pedersen commitment
+let commitment = Commitment::new(
+    vec![100, 200],  // value
+    vec![50, 75]     // randomness
+);
+
+// Configure a zk-SNARK circuit
+let mut config = CircuitConfig::minimal(17); // 2^17 rows
+config.add_param("max_transfers".to_string(), "10".to_string());
+println!("Circuit has {} rows", config.num_rows());
+```
+
+**Next:** Milestone 1 implementation starts with the `zk-compiler` (halo2 circuit parser and WASM compilation).
+
+---
+
+## Project Status
 
 | Phase | Status | Timeline |
 |-------|--------|----------|
@@ -77,7 +138,10 @@ fn main() {
 
 ---
 
-## 🏗️ Architecture
+
+## Architecture
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for more details on the architecture.
 
 ```
 ┌─────────────────────┐
@@ -106,94 +170,102 @@ fn main() {
 
 ## 🛠️ Tech Stack
 
-- **🦀 Rust** - Memory-safe systems programming
-- **🔐 halo2_proofs** - State-of-the-art zk-SNARK library
-- **⚡ Arbitrum Stylus SDK** - Next-gen smart contract platform
-- **🌐 WebAssembly (WASM)** - High-performance execution target
+- **Rust** - Memory-safe systems programming
+- **halo2_proofs** - State-of-the-art zk-SNARK library
+- **Arbitrum Stylus SDK** - Next-gen smart contract platform
+- **WebAssembly (WASM)** - High-performance execution target
 
 ---
 
-## 💻 Development
+## Development
 
-### Build the workspace
+### Using Scripts
+
+We provide helper scripts for common development tasks:
 
 ```bash
+# Setup development environment (first time only)
+./scripts/setup.sh
+
+# Run all tests with coverage
+./scripts/test.sh
+
+# Full validation (build + test + clippy + fmt)
+./scripts/check.sh
+
+# Clean build artifacts
+./scripts/clean.sh
+```
+
+### Manual Commands
+
+```bash
+# Build workspace
 cargo build --workspace
-```
 
-### Run all tests
-
-```bash
+# Run tests
 cargo test --workspace
-```
 
-### Lint and format
+# Run linter
+cargo clippy --workspace --all-targets --all-features
 
-```bash
-cargo clippy --workspace -- -D warnings
+# Format code
 cargo fmt --all
-```
 
-### Build documentation
-
-```bash
+# Generate documentation
 cargo doc --workspace --no-deps --open
 ```
 
+### Project Structure
+
+```
+zerostyl/
+├── crates/
+│   ├── zerostyl-compiler/    # M1: zk-SNARK compiler (in development)
+│   ├── zerostyl-debugger/    # M2: Privacy debugger (planned)
+│   ├── zerostyl-exporter/    # M3: ABI exporter (planned)
+│   └── zerostyl-runtime/     # ✅ Shared runtime (completed - 29 tests)
+├── docs/                     # Architecture & contribution guides
+│   ├── ARCHITECTURE.md       # Technical deep dive
+│   └── CONTRIBUTING.md       # Contributor guidelines
+├── scripts/                  # Development utilities
+│   ├── setup.sh              # Initial setup
+│   ├── test.sh               # Run tests + coverage
+│   ├── check.sh              # Pre-commit validation
+│   └── clean.sh              # Clean workspace
+└── examples/                 # Example circuits (coming in M1)
+```
+
 ---
 
-## 🗺️ Roadmap
-
-For detailed milestone breakdowns and technical specifications, see [docs/ROADMAP.md](docs/ROADMAP.md) *(coming soon)*.
-
-**Key Milestones:**
-1. **Q1 2025**: zk-Compiler with halo2 integration
-2. **Q2 2025**: Privacy Debugger with constraint visualization
-3. **Q3 2025**: ABI Exporter and ecosystem integration
-
----
-
-## 🤝 Contributing
+## Contributing
 
 We welcome contributions from the community! Whether you're fixing bugs, adding features, or improving documentation, your help is appreciated.
 
-See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) *(coming soon)* for guidelines on:
+See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for guidelines on:
 - Code style and conventions
-- Testing requirements
+- Testing requirements (target: 80%+ coverage)
 - Pull request process
-- Community standards
+- Commit message conventions
+- Code of conduct
 
 ---
 
-## 📄 License
+## License
 
 This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) file for details.
 
 ---
 
-## 🙏 Acknowledgments
-
-ZeroStyl is made possible by:
-
-- **Arbitrum DAO Grant Program** - Financial support and ecosystem collaboration
-- **halo2 Community** - Pioneering zk-SNARK research and tooling
-- **Stylus Team** - Next-generation smart contract platform
-- **Open Source Contributors** - Everyone who helps make privacy accessible
-
----
-
-## 📬 Contact & Community
+## Contact & Community
 
 - **GitHub Issues**: [Report bugs or request features](https://github.com/kazai777/zerostyl/issues)
 - **Discussions**: [Join the conversation](https://github.com/kazai777/zerostyl/discussions)
-- **Twitter**: [@zerostyl_dev](https://twitter.com/zerostyl_dev) *(placeholder)*
 
 ---
 
 <div align="center">
 
 **Built with ❤️ for the privacy-first Web3 future**
-
-[Documentation](https://docs.zerostyl.dev) • [Examples](examples/) • [Changelog](CHANGELOG.md)
 
 </div>
