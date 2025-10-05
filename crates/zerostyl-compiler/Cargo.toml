@@ -1,0 +1,17 @@
+[package]
+name = "zerostyl-compiler"
+version = "0.1.0"
+edition = "2021"
+authors = ["Zakaria Chaikhi <zakaria.chaikhi@example.com>"]
+license = "MIT"
+description = "Compile halo2 zk-SNARKs circuits to WASM for Arbitrum Stylus contracts"
+repository = "https://github.com/kazai777/zerostyl"
+keywords = ["arbitrum", "stylus", "zero-knowledge", "privacy", "zk-snarks"]
+categories = ["cryptography", "development-tools"]
+
+[dependencies]
+halo2_proofs = "0.3"
+stylus-sdk = "0.9.0"
+ruint = "=1.12.3"
+serde = { version = "1.0", features = ["derive"] }
+anyhow = "1.0"

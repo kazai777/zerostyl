@@ -1,0 +1,17 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/zerostyl-compiler",
+    "crates/zerostyl-debugger",
+    "crates/zerostyl-exporter",
+    "crates/zerostyl-runtime",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["ZeroStyl Contributors"]
+license = "MIT"
+repository = "https://github.com/kazai777/ZeroStyl"
+
+[workspace.dependencies]

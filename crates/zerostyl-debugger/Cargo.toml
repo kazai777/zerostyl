@@ -1,0 +1,17 @@
+[package]
+name = "zerostyl-debugger"
+version = "0.1.0"
+edition = "2021"
+authors = ["Zakaria Chaikhi <zakaria.chaikhi@example.com>"]
+license = "MIT"
+description = "Privacy debugger with zk-mocking for Stylus smart contracts"
+repository = "https://github.com/kazai777/zerostyl"
+keywords = ["arbitrum", "stylus", "zero-knowledge", "privacy", "zk-snarks"]
+categories = ["cryptography", "development-tools"]
+
+[dependencies]
+zerostyl-runtime = { path = "../zerostyl-runtime" }
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
+anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }

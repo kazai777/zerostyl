@@ -1,0 +1,17 @@
+[package]
+name = "zerostyl-runtime"
+version = "0.1.0"
+edition = "2021"
+authors = ["Zakaria Chaikhi <zakaria.chaikhi@example.com>"]
+license = "MIT"
+description = "Shared runtime utilities for ZeroStyl toolkit"
+repository = "https://github.com/kazai777/zerostyl"
+keywords = ["arbitrum", "stylus", "zero-knowledge", "privacy", "zk-snarks"]
+categories = ["cryptography", "development-tools"]
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "1.0"
+
+[dev-dependencies]
+serde_json = "1.0"
