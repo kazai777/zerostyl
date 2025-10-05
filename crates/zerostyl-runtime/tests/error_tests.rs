@@ -68,7 +68,9 @@ fn test_result_type_ok() {
 
     let result: Result<i32> = Ok(42);
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), 42);
+    if let Ok(value) = result {
+        assert_eq!(value, 42);
+    }
 }
 
 #[test]
@@ -78,5 +80,7 @@ fn test_result_type_err() {
 
     let result: Result<i32> = Err(ZeroStylError::other("test error"));
     assert!(result.is_err());
-    assert_eq!(result.unwrap_err().to_string(), "test error");
+    if let Err(error) = result {
+        assert_eq!(error.to_string(), "test error");
+    }
 }
