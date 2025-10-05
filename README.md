@@ -1,6 +1,6 @@
 # ZeroStyl 🔐
 
-[![Build Status](https://img.shields.io/github/actions/workflow/status/kazai777/zerostyl/ci.yml?branch=main)](https://github.com/kazai777/zerostyl/actions)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/kazai777/zerostyl/ci.yml?branch=main)](https://github.com/kazai777/ZeroStyl/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Rust Version](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org)
 [![Arbitrum Stylus](https://img.shields.io/badge/Arbitrum-Stylus-blue)](https://arbitrum.io/stylus)
