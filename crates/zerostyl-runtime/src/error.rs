@@ -1,46 +1,38 @@
 //! Error types for ZeroStyl toolkit
-//!
-//! This module defines the error types used throughout the ZeroStyl ecosystem,
-//! providing consistent error handling across all components.
 
 use thiserror::Error;
 
 /// Result type alias for ZeroStyl operations
 pub type Result<T> = std::result::Result<T, ZeroStylError>;
 
-/// The main error type for ZeroStyl operations
-///
-/// This enum covers all error cases that can occur when working with
-/// ZeroStyl components, from proof generation to compilation and serialization.
+/// Main error type for ZeroStyl operations
 #[derive(Debug, Error)]
 pub enum ZeroStylError {
     /// Invalid or malformed zero-knowledge proof
-    ///
-    /// This error occurs when a proof fails verification or has an invalid format
     #[error("Invalid proof: {0}")]
     InvalidProof(String),
 
     /// Circuit compilation error
-    ///
-    /// This error occurs during the compilation of halo2 circuits to WASM
     #[error("Compilation error: {0}")]
     CompilationError(String),
 
     /// Serialization or deserialization error
-    ///
-    /// This error occurs when converting between binary and structured formats
     #[error("Serialization error: {0}")]
     SerializationError(String),
 
-    /// I/O error
-    ///
-    /// This error wraps standard I/O errors
+    /// I/O error wrapper
     #[error("I/O error: {0}")]
     IoError(#[from] std::io::Error),
 
-    /// Generic error for other cases
-    ///
-    /// This error covers any other error cases not specifically handled above
+    /// Invalid cryptographic commitment
+    #[error("Invalid commitment: {0}")]
+    InvalidCommitment(String),
+
+    /// Invalid circuit configuration parameters
+    #[error("Invalid circuit configuration: {0}")]
+    InvalidCircuitConfig(String),
+
+    /// Other errors not covered by specific variants
     #[error("{0}")]
     Other(String),
 }
