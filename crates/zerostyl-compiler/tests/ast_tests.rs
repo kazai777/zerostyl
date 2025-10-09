@@ -340,3 +340,47 @@ fn test_public_private_separation() {
     assert_eq!(ir.public_inputs.len(), 0);
     assert_eq!(ir.private_witnesses.len(), 1);
 }
+
+// ============================================================================
+// EDGE CASES FOR COVERAGE
+// ============================================================================
+
+#[test]
+fn test_parse_all_basic_types() {
+    let input = r#"
+        struct AllTypes {
+            #[zk_private]
+            v_u8: u8,
+            #[zk_private]
+            v_u16: u16,
+            #[zk_private]
+            v_u32: u32,
+            #[zk_private]
+            v_i64: i64,
+        }
+    "#;
+
+    let parsed = parse_contract(input).unwrap();
+    let ir = transform_to_ir(parsed).unwrap();
+    
+    assert_eq!(ir.private_witnesses.len(), 4);
+    assert!(matches!(ir.private_witnesses[0].field_type, ZkType::U8));
+    assert!(matches!(ir.private_witnesses[1].field_type, ZkType::U16));
+    assert!(matches!(ir.private_witnesses[2].field_type, ZkType::U32));
+    assert!(matches!(ir.private_witnesses[3].field_type, ZkType::I64));
+}
+
+#[test]
+fn test_many_fields() {
+    let mut fields = String::new();
+    for i in 0..50 {
+        fields.push_str(&format!("    #[zk_private]\n    field_{}: u64,\n", i));
+    }
+
+    let input = format!("struct LargeContract {{\n{}}}", fields);
+    let result = parse_contract(&input).unwrap();
+    assert_eq!(result.private_fields.len(), 50);
+
+    let ir = transform_to_ir(result).unwrap();
+    assert_eq!(ir.private_witnesses.len(), 50);
+}

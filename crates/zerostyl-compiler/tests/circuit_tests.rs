@@ -686,3 +686,18 @@ fn test_payment_contract_with_addresses() {
     assert!(matches!(ir.private_witnesses[0].field_type, ZkType::Address));
     assert!(matches!(ir.private_witnesses[1].field_type, ZkType::Address));
 }
+
+#[test]
+fn test_circuit_validates_large_circuits() {
+    let mut fields = String::new();
+    for i in 0..100 {
+        fields.push_str(&format!("    #[zk_private]\n    field_{}: u64,\n", i));
+    }
+
+    let input = format!("struct LargeCircuit {{\n{}}}", fields);
+    let parsed = parse_contract(&input).unwrap();
+    let ir = transform_to_ir(parsed).unwrap();
+
+    let result = validate_circuit_ir(&ir);
+    assert!(result.is_ok(), "100 fields should be valid with k=16");
+}
