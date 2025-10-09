@@ -207,9 +207,6 @@ fn test_mock_prover_simple_circuit() {
 
     let builder = CircuitBuilder::new(ir);
     let _circuit = builder.build::<TestField>();
-
-    // Circuit structure created successfully
-    // Note: Full MockProver testing requires witness values (Sprint 1.2)
 }
 
 #[test]
@@ -232,9 +229,6 @@ fn test_mock_prover_multi_witness_circuit() {
 
     let builder = CircuitBuilder::new(ir);
     let _circuit = builder.build::<TestField>();
-
-    // Circuit structure created successfully
-    // Note: Full MockProver testing requires witness values (Sprint 1.2)
 }
 
 #[test]
