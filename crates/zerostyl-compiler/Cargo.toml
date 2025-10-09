@@ -10,8 +10,13 @@ keywords = ["arbitrum", "stylus", "zero-knowledge", "privacy", "zk-snarks"]
 categories = ["cryptography", "development-tools"]
 
 [dependencies]
-halo2_proofs = "0.3"
+zerostyl-runtime = { path = "../zerostyl-runtime" }
+halo2_proofs = { version = "0.3", features = ["dev-graph"] }
+halo2curves = "0.7"
 stylus-sdk = "0.9.0"
 ruint = "=1.12.3"
 serde = { version = "1.0", features = ["derive"] }
 anyhow = "1.0"
+syn = { version = "2.0", features = ["full", "parsing"] }
+quote = "1.0"
+thiserror = "1.0"
