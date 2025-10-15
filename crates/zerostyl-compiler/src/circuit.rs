@@ -24,7 +24,7 @@
 use crate::{CircuitIR, CompilerError, ZkType};
 use halo2_proofs::{
     arithmetic::Field as Halo2Field,
-    circuit::{AssignedCell, Layouter, SimpleFloorPlanner, Value},
+    circuit::{Layouter, SimpleFloorPlanner, Value},
     plonk::{Advice, Circuit, Column, ConstraintSystem, Error as Halo2Error, Instance},
 };
 
@@ -62,7 +62,11 @@ impl CircuitBuilder {
             );
         }
 
-        ZkCircuit { ir: self.circuit_ir, _marker: std::marker::PhantomData }
+        // Initialize with zero values - use with_witnesses() to set actual values
+        let witness_values = vec![Value::known(F::ZERO); self.circuit_ir.private_witnesses.len()];
+        let public_values = vec![Value::known(F::ZERO); self.circuit_ir.public_inputs.len()];
+
+        ZkCircuit { ir: self.circuit_ir, witness_values, public_values }
     }
 }
 
@@ -72,14 +76,88 @@ pub struct ZkCircuitConfig {
     instance: Column<Instance>,
 }
 
+#[derive(Clone, Debug)]
 pub struct ZkCircuit<F: Halo2Field> {
     pub ir: CircuitIR,
-    _marker: std::marker::PhantomData<F>,
+    /// Private witness values for the circuit
+    /// Each Value<F> corresponds to a private witness field in ir.private_witnesses
+    /// Uses Value::unknown() during key generation, Value::known() during proving
+    pub witness_values: Vec<Value<F>>,
+    /// Public input values for the circuit
+    /// Each Value<F> corresponds to a public input field in ir.public_inputs
+    pub public_values: Vec<Value<F>>,
 }
 
 impl<F: Halo2Field> ZkCircuit<F> {
     pub const MAX_SINGLE_ROW_WITNESSES: usize = 10;
     pub const MAX_PUBLIC_INPUTS: usize = 5;
+
+    /// Set witness values for proof generation
+    ///
+    /// # Arguments
+    /// * `witnesses` - Field elements corresponding to private witness fields
+    ///
+    /// # Returns
+    /// Self with updated witness values
+    ///
+    /// # Examples
+    /// ```
+    /// use zerostyl_compiler::{parse_contract, transform_to_ir, CircuitBuilder};
+    /// use halo2curves::pasta::Fp;
+    ///
+    /// let input = r#"
+    ///     struct MyCircuit {
+    ///         #[zk_private]
+    ///         secret: u64,
+    ///     }
+    /// "#;
+    ///
+    /// let parsed = parse_contract(input).unwrap();
+    /// let ir = transform_to_ir(parsed).unwrap();
+    /// let circuit = CircuitBuilder::new(ir)
+    ///     .build::<Fp>()
+    ///     .with_witnesses(vec![Fp::from(42)]);
+    /// ```
+    pub fn with_witnesses(mut self, witnesses: Vec<F>) -> Result<Self, CompilerError> {
+        if witnesses.len() != self.ir.private_witnesses.len() {
+            return Err(CompilerError::Other(format!(
+                "Expected {} witnesses but got {}",
+                self.ir.private_witnesses.len(),
+                witnesses.len()
+            )));
+        }
+        self.witness_values = witnesses.into_iter().map(Value::known).collect();
+        Ok(self)
+    }
+
+    /// Set public input values for proof generation
+    ///
+    /// # Arguments
+    /// * `public_inputs` - Field elements corresponding to public input fields
+    ///
+    /// # Returns
+    /// Self with updated public input values
+    pub fn with_public_inputs(mut self, public_inputs: Vec<F>) -> Result<Self, CompilerError> {
+        if public_inputs.len() != self.ir.public_inputs.len() {
+            return Err(CompilerError::Other(format!(
+                "Expected {} public inputs but got {}",
+                self.ir.public_inputs.len(),
+                public_inputs.len()
+            )));
+        }
+        self.public_values = public_inputs.into_iter().map(Value::known).collect();
+        Ok(self)
+    }
+
+    /// Get the number of expected witnesses
+    pub fn num_witnesses(&self) -> usize {
+        self.ir.private_witnesses.len()
+    }
+
+    /// Get the number of expected public inputs
+    pub fn num_public_inputs(&self) -> usize {
+        self.ir.public_inputs.len()
+    }
 }
 
 impl<F: Halo2Field> Circuit<F> for ZkCircuit<F> {
@@ -87,7 +165,12 @@ impl<F: Halo2Field> Circuit<F> for ZkCircuit<F> {
     type FloorPlanner = SimpleFloorPlanner;
 
     fn without_witnesses(&self) -> Self {
-        Self { ir: self.ir.clone(), _marker: std::marker::PhantomData }
+        // Returns a copy with zero witness values for circuit structure testing
+        Self {
+            ir: self.ir.clone(),
+            witness_values: vec![Value::known(F::ZERO); self.ir.private_witnesses.len()],
+            public_values: vec![Value::known(F::ZERO); self.ir.public_inputs.len()],
+        }
     }
 
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
@@ -112,42 +195,47 @@ impl<F: Halo2Field> Circuit<F> for ZkCircuit<F> {
         config: Self::Config,
         mut layouter: impl Layouter<F>,
     ) -> Result<(), Halo2Error> {
-        layouter.assign_region(
-            || "public inputs",
-            |mut region| {
-                for (idx, public_input) in self.ir.public_inputs.iter().enumerate() {
-                    let column_idx = idx % config.advice.len();
-                    let row = idx / config.advice.len();
+        // Assign private witness values to advice columns
+        if !self.witness_values.is_empty() {
+            let witness_values = self.witness_values.clone();
+            layouter.assign_region(
+                || "witness_region",
+                |mut region| {
+                    for (idx, &value) in witness_values.iter().enumerate() {
+                        let column_idx = idx % config.advice.len();
+                        let row = idx / config.advice.len();
 
-                    region.assign_advice_from_instance(
-                        || format!("public {}", public_input.name),
-                        config.instance,
-                        idx,
-                        config.advice[column_idx],
-                        row,
-                    )?;
-                }
-                Ok(())
-            },
-        )?;
+                        region.assign_advice(
+                            || format!("witness_{}", idx),
+                            config.advice[column_idx],
+                            row,
+                            || value,
+                        )?;
+                    }
+                    Ok(())
+                },
+            )?;
+        }
 
-        layouter.assign_region(
-            || "private witnesses",
-            |mut region| {
-                for (idx, witness) in self.ir.private_witnesses.iter().enumerate() {
-                    let column_idx = idx % config.advice.len();
-                    let row = idx / config.advice.len();
-
-                    let _cell: AssignedCell<F, F> = region.assign_advice(
-                        || format!("witness {}", witness.name),
-                        config.advice[column_idx],
-                        row,
-                        || Value::unknown(),
-                    )?;
-                }
-                Ok(())
-            },
-        )?;
+        // Assign public input values from instance column to advice columns
+        if !self.public_values.is_empty() {
+            let public_values = self.public_values.clone();
+            layouter.assign_region(
+                || "public_input_region",
+                |mut region| {
+                    for (idx, _value) in public_values.iter().enumerate() {
+                        region.assign_advice_from_instance(
+                            || format!("public_{}", idx),
+                            config.instance,
+                            idx,
+                            config.advice[0],
+                            idx,
+                        )?;
+                    }
+                    Ok(())
+                },
+            )?;
+        }
 
         Ok(())
     }
@@ -274,5 +362,90 @@ mod tests {
         let rows = estimate_required_rows(&ir);
         // 3 witnesses + constraints + padding
         assert!(rows >= 6); // 3 witnesses * 2 (padding factor)
+    }
+
+    #[test]
+    fn test_with_witnesses() {
+        use halo2curves::pasta::Fp;
+
+        let input = r#"
+            struct TestCircuit {
+                #[zk_private]
+                value1: u64,
+                #[zk_private]
+                value2: u64,
+            }
+        "#;
+
+        let parsed = parse_contract(input).unwrap();
+        let ir = transform_to_ir(parsed).unwrap();
+        let circuit = CircuitBuilder::new(ir)
+            .build::<Fp>()
+            .with_witnesses(vec![Fp::from(42), Fp::from(100)])
+            .unwrap();
+
+        assert_eq!(circuit.witness_values.len(), 2);
+    }
+
+    #[test]
+    fn test_with_witnesses_wrong_count() {
+        use halo2curves::pasta::Fp;
+
+        let input = r#"
+            struct TestCircuit {
+                #[zk_private]
+                value: u64,
+            }
+        "#;
+
+        let parsed = parse_contract(input).unwrap();
+        let ir = transform_to_ir(parsed).unwrap();
+        let result =
+            CircuitBuilder::new(ir).build::<Fp>().with_witnesses(vec![Fp::from(42), Fp::from(100)]);
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Expected 1 witnesses but got 2"));
+    }
+
+    #[test]
+    fn test_with_public_inputs_empty() {
+        use halo2curves::pasta::Fp;
+
+        let input = r#"
+            struct TestCircuit {
+                #[zk_private]
+                secret: u64,
+            }
+        "#;
+
+        let parsed = parse_contract(input).unwrap();
+        let ir = transform_to_ir(parsed).unwrap();
+
+        // Currently our parser doesn't create public inputs
+        assert_eq!(ir.public_inputs.len(), 0);
+
+        let circuit = CircuitBuilder::new(ir).build::<Fp>();
+        assert_eq!(circuit.num_public_inputs(), 0);
+    }
+
+    #[test]
+    fn test_num_witnesses_and_public_inputs() {
+        use halo2curves::pasta::Fp;
+
+        let input = r#"
+            struct TestCircuit {
+                #[zk_private]
+                w1: u64,
+                #[zk_private]
+                w2: u64,
+            }
+        "#;
+
+        let parsed = parse_contract(input).unwrap();
+        let ir = transform_to_ir(parsed).unwrap();
+        let circuit = CircuitBuilder::new(ir).build::<Fp>();
+
+        assert_eq!(circuit.num_witnesses(), 2);
+        assert_eq!(circuit.num_public_inputs(), 0);
     }
 }

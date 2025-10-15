@@ -362,7 +362,7 @@ fn test_parse_all_basic_types() {
 
     let parsed = parse_contract(input).unwrap();
     let ir = transform_to_ir(parsed).unwrap();
-    
+
     assert_eq!(ir.private_witnesses.len(), 4);
     assert!(matches!(ir.private_witnesses[0].field_type, ZkType::U8));
     assert!(matches!(ir.private_witnesses[1].field_type, ZkType::U16));

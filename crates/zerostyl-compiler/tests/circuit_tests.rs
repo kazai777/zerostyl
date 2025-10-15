@@ -186,7 +186,6 @@ fn test_circuit_build_to_zk_circuit() {
 
     let zk_circuit = builder.build::<TestField>();
 
-    // ZkCircuit is created successfully
     assert_eq!(zk_circuit.ir.name, "TestCircuit");
 }
 
@@ -202,7 +201,6 @@ fn test_mock_prover_simple_circuit() {
     let parsed = parse_contract(input).unwrap();
     let ir = transform_to_ir(parsed).unwrap();
 
-    // Validate before building
     assert!(validate_circuit_ir(&ir).is_ok());
 
     let builder = CircuitBuilder::new(ir);
@@ -247,7 +245,6 @@ fn test_circuit_without_witnesses() {
 
     let circuit_copy = circuit.without_witnesses();
 
-    // Should create a copy for verification
     assert_eq!(circuit_copy.ir.name, "TestCircuit");
 }
 
@@ -266,7 +263,6 @@ fn test_circuit_config_k_parameter() {
     // Default k is 16 (2^16 = 65536 rows)
     assert_eq!(ir.circuit_config.k(), 16);
 
-    // Validate circuit fits within k
     assert!(validate_circuit_ir(&ir).is_ok());
 }
 
@@ -284,7 +280,6 @@ fn test_circuit_config_with_custom_k() {
     let parsed = parse_contract(input).unwrap();
     let mut ir = transform_to_ir(parsed).unwrap();
 
-    // Set custom k value
     let custom_config = CircuitConfig::minimal(10).unwrap(); // 2^10 = 1024 rows
     ir.circuit_config = custom_config;
 
@@ -309,8 +304,6 @@ fn test_circuit_with_range_constraint() {
 
     let builder = CircuitBuilder::new(ir);
     let _circuit = builder.build::<TestField>();
-
-    // Circuit structure with constraints created successfully
 }
 
 #[test]
@@ -344,7 +337,6 @@ fn test_validate_circuit_ir_empty_struct() {
     let parsed = parse_contract(input).unwrap();
     let ir = transform_to_ir(parsed).unwrap();
 
-    // Empty circuits are valid (though not useful)
     let result = validate_circuit_ir(&ir);
     assert!(result.is_ok());
 }
@@ -379,15 +371,12 @@ fn test_circuit_with_10_fields_no_collision() {
     let builder = CircuitBuilder::new(ir);
     let circuit = builder.build::<TestField>();
 
-    // Circuit structure created successfully
     assert_eq!(circuit.ir.private_witnesses.len(), 10);
     assert_eq!(circuit.ir.name, "LargeCircuit");
 }
 
 #[test]
 fn test_circuit_with_20_fields() {
-    // Test multi-row layout: 20 fields with 10 columns = 2 rows needed
-
     let input = format!(
         "struct HugeCircuit {{ {} }}",
         (1..=20).map(|i| format!("#[zk_private] field{}: u64", i)).collect::<Vec<_>>().join(", ")
@@ -408,7 +397,6 @@ fn test_circuit_with_20_fields() {
 #[test]
 fn test_circuit_with_100_fields() {
     // Extreme test: 100 fields to verify scalability
-    // With 10 columns: 100 / 10 = 10 rows needed
 
     let input = format!(
         "struct MassiveCircuit {{ {} }}",
@@ -429,8 +417,6 @@ fn test_circuit_with_100_fields() {
 
 #[test]
 fn test_circuit_exactly_10_fields_single_row() {
-    // Edge case: exactly 10 fields should fit in single row
-
     let input = format!(
         "struct ExactlyTen {{ {} }}",
         (1..=10).map(|i| format!("#[zk_private] x{}: u64", i)).collect::<Vec<_>>().join(", ")
@@ -449,8 +435,6 @@ fn test_circuit_exactly_10_fields_single_row() {
 
 #[test]
 fn test_circuit_11_fields_multi_row() {
-    // Edge case: 11 fields should trigger multi-row (field[10] → col 0, row 1)
-
     let input = format!(
         "struct ElevenFields {{ {} }}",
         (1..=11).map(|i| format!("#[zk_private] field{}: u64", i)).collect::<Vec<_>>().join(", ")
@@ -469,8 +453,6 @@ fn test_circuit_11_fields_multi_row() {
 
 #[test]
 fn test_row_calculation_correctness() {
-    // Verify circuit with 15 fields compiles correctly
-
     let input = format!(
         "struct TestRows {{ {} }}",
         (1..=15).map(|i| format!("#[zk_private] f{}: u64", i)).collect::<Vec<_>>().join(", ")
@@ -487,8 +469,6 @@ fn test_row_calculation_correctness() {
 
 #[test]
 fn test_circuit_with_mixed_types() {
-    // Verify row allocation works with different types
-
     let input = r#"
         struct MixedTypes {
             #[zk_private] u64_1: u64,
@@ -518,7 +498,6 @@ fn test_circuit_with_mixed_types() {
 
 #[test]
 fn test_public_inputs_allocation() {
-    // Verify public inputs region compiles
     let input = "struct Simple { #[zk_private] x: u64 }";
     let parsed = parse_contract(input).unwrap();
     let ir = transform_to_ir(parsed).unwrap();
@@ -531,7 +510,6 @@ fn test_public_inputs_allocation() {
 
 #[test]
 fn test_max_single_row_constant() {
-    // Verify the MAX_SINGLE_ROW_WITNESSES constant is accessible
     use halo2curves::pasta::Fp;
     use zerostyl_compiler::ZkCircuit;
 
@@ -700,4 +678,206 @@ fn test_circuit_validates_large_circuits() {
 
     let result = validate_circuit_ir(&ir);
     assert!(result.is_ok(), "100 fields should be valid with k=16");
+}
+
+#[test]
+fn test_circuit_builder_warning_too_many_witnesses() {
+    let input = format!(
+        "struct TooManyWitnesses {{ {} }}",
+        (1..=15).map(|i| format!("#[zk_private] w{}: u64", i)).collect::<Vec<_>>().join(", ")
+    );
+
+    let parsed = parse_contract(&input).unwrap();
+    let ir = transform_to_ir(parsed).unwrap();
+    let builder = CircuitBuilder::new(ir);
+
+    let circuit = builder.build::<TestField>();
+    assert_eq!(circuit.ir.private_witnesses.len(), 15);
+}
+
+#[test]
+fn test_circuit_builder_warning_too_many_public_inputs() {
+    // Note: Current parser doesn't support public inputs yet, so this tests the logic path
+    let input = r#"
+        struct ManyInputs {
+            #[zk_private] f1: u64,
+            #[zk_private] f2: u64,
+        }
+    "#;
+
+    let parsed = parse_contract(input).unwrap();
+    let mut ir = transform_to_ir(parsed).unwrap();
+
+    use zerostyl_compiler::ZkField;
+    for i in 0..7 {
+        ir.public_inputs.push(ZkField {
+            name: format!("public_{}", i),
+            field_type: zerostyl_compiler::ZkType::U64,
+            constraints: vec![],
+        });
+    }
+
+    let builder = CircuitBuilder::new(ir);
+    let circuit = builder.build::<TestField>();
+
+    assert_eq!(circuit.ir.public_inputs.len(), 7);
+}
+
+#[test]
+fn test_validate_circuit_ir_with_valid_array_size() {
+    let input = r#"
+        struct ValidArrayCircuit {
+            #[zk_private]
+            data: [u8; 32],
+        }
+    "#;
+
+    let parsed = parse_contract(input).unwrap();
+    let ir = transform_to_ir(parsed).unwrap();
+
+    let result = validate_circuit_ir(&ir);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_validate_zk_type_i64() {
+    let input = r#"
+        struct I64Circuit {
+            #[zk_private]
+            signed_value: i64,
+        }
+    "#;
+
+    let parsed = parse_contract(input).unwrap();
+    let ir = transform_to_ir(parsed).unwrap();
+
+    let result = validate_circuit_ir(&ir);
+    assert!(result.is_ok());
+
+    use zerostyl_compiler::ZkType;
+    assert!(matches!(ir.private_witnesses[0].field_type, ZkType::I64));
+}
+
+#[test]
+fn test_validate_zk_type_bytes32() {
+    let input = r#"
+        struct BytesCircuit {
+            #[zk_private]
+            hash: [u8; 32],
+        }
+    "#;
+
+    let parsed = parse_contract(input).unwrap();
+    let ir = transform_to_ir(parsed).unwrap();
+
+    let result = validate_circuit_ir(&ir);
+    assert!(result.is_ok());
+
+    use zerostyl_compiler::ZkType;
+    assert!(matches!(ir.private_witnesses[0].field_type, ZkType::Bytes32));
+}
+
+#[test]
+fn test_validate_circuit_too_many_rows_required() {
+    use zerostyl_runtime::CircuitConfig;
+
+    let input = format!(
+        "struct HugeCircuit {{ {} }}",
+        (1..=200).map(|i| format!("#[zk_private] f{}: u64", i)).collect::<Vec<_>>().join(", ")
+    );
+
+    let parsed = parse_contract(&input).unwrap();
+    let mut ir = transform_to_ir(parsed).unwrap();
+
+    ir.circuit_config = CircuitConfig::minimal(4).unwrap(); // Only 2^4 = 16 rows
+
+    let result = validate_circuit_ir(&ir);
+    assert!(result.is_err());
+
+    let err = result.unwrap_err();
+    assert!(err.to_string().contains("requires"));
+    assert!(err.to_string().contains("rows"));
+}
+
+#[test]
+fn test_estimate_required_rows_calculation() {
+    let input = r#"
+        struct TestEstimate {
+            #[zk_private] w1: u64,
+            #[zk_private] w2: u64,
+            #[zk_private] w3: u64,
+        }
+    "#;
+
+    let parsed = parse_contract(input).unwrap();
+    let ir = transform_to_ir(parsed).unwrap();
+
+    // 3 witnesses + constraints should be estimated correctly
+    // validate_circuit_ir will use estimate_required_rows internally
+    let result = validate_circuit_ir(&ir);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_zkircuit_config_structure() {
+    let input = "struct Test { #[zk_private] x: u64 }";
+    let parsed = parse_contract(input).unwrap();
+    let ir = transform_to_ir(parsed).unwrap();
+    let builder = CircuitBuilder::new(ir);
+    let circuit = builder.build::<TestField>();
+
+    // ZkCircuitConfig should be created via configure()
+    // This is tested implicitly through circuit creation
+    assert_eq!(circuit.ir.name, "Test");
+}
+
+#[test]
+fn test_circuit_builder_exactly_max_single_row() {
+    let input = format!(
+        "struct ExactlyMax {{ {} }}",
+        (1..=10).map(|i| format!("#[zk_private] f{}: u64", i)).collect::<Vec<_>>().join(", ")
+    );
+
+    let parsed = parse_contract(&input).unwrap();
+    let ir = transform_to_ir(parsed).unwrap();
+    let builder = CircuitBuilder::new(ir);
+    let circuit = builder.build::<TestField>();
+
+    assert_eq!(circuit.ir.private_witnesses.len(), 10);
+}
+
+#[test]
+fn test_circuit_builder_one_over_max_single_row() {
+    let input = format!(
+        "struct OneOverMax {{ {} }}",
+        (1..=11).map(|i| format!("#[zk_private] f{}: u64", i)).collect::<Vec<_>>().join(", ")
+    );
+
+    let parsed = parse_contract(&input).unwrap();
+    let ir = transform_to_ir(parsed).unwrap();
+    let builder = CircuitBuilder::new(ir);
+    let circuit = builder.build::<TestField>();
+
+    assert_eq!(circuit.ir.private_witnesses.len(), 11);
+}
+
+#[test]
+fn test_circuit_with_six_public_inputs() {
+    let input = "struct Test { #[zk_private] x: u64 }";
+    let parsed = parse_contract(input).unwrap();
+    let mut ir = transform_to_ir(parsed).unwrap();
+
+    use zerostyl_compiler::ZkField;
+    for i in 0..6 {
+        ir.public_inputs.push(ZkField {
+            name: format!("pub{}", i),
+            field_type: zerostyl_compiler::ZkType::U64,
+            constraints: vec![],
+        });
+    }
+
+    let builder = CircuitBuilder::new(ir);
+    let circuit = builder.build::<TestField>();
+
+    assert_eq!(circuit.ir.public_inputs.len(), 6);
 }

@@ -252,4 +252,38 @@ mod tests {
             assert_eq!(result, expected, "Failed for type: {}", type_str);
         }
     }
+
+    #[test]
+    fn test_default_constraints_array_type() {
+        let array_type = ZkType::Array { element_type: Box::new(ZkType::U64), size: 10 };
+        let constraints = default_constraints(&array_type);
+        assert_eq!(constraints.len(), 0);
+    }
+
+    #[test]
+    fn test_default_constraints_all_integer_types() {
+        let constraints = default_constraints(&ZkType::U8);
+        assert_eq!(constraints.len(), 1);
+
+        let constraints = default_constraints(&ZkType::U16);
+        assert_eq!(constraints.len(), 1);
+
+        let constraints = default_constraints(&ZkType::U32);
+        assert_eq!(constraints.len(), 1);
+
+        let constraints = default_constraints(&ZkType::I64);
+        assert_eq!(constraints.len(), 0);
+    }
+
+    #[test]
+    fn test_default_constraints_special_types() {
+        let constraints = default_constraints(&ZkType::Field);
+        assert_eq!(constraints.len(), 0);
+
+        let constraints = default_constraints(&ZkType::Bytes32);
+        assert_eq!(constraints.len(), 0);
+
+        let constraints = default_constraints(&ZkType::Address);
+        assert_eq!(constraints.len(), 0);
+    }
 }
