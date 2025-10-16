@@ -80,11 +80,11 @@ pub struct ZkCircuitConfig {
 pub struct ZkCircuit<F: Halo2Field> {
     pub ir: CircuitIR,
     /// Private witness values for the circuit
-    /// Each Value<F> corresponds to a private witness field in ir.private_witnesses
-    /// Uses Value::unknown() during key generation, Value::known() during proving
+    /// Each `Value<F>` corresponds to a private witness field in ir.private_witnesses
+    /// Uses `Value::unknown()` during key generation, `Value::known()` during proving
     pub witness_values: Vec<Value<F>>,
     /// Public input values for the circuit
-    /// Each Value<F> corresponds to a public input field in ir.public_inputs
+    /// Each `Value<F>` corresponds to a public input field in ir.public_inputs
     pub public_values: Vec<Value<F>>,
 }
 
