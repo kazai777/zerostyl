@@ -244,7 +244,6 @@ impl TxPrivacyCircuit {
         }
     }
 
-
     pub fn compute_commitment(balance: Fp, randomness: Fp) -> Fp {
         balance + randomness
     }
