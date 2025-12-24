@@ -4,8 +4,8 @@
 
 use crate::{CircuitIR, CompilerError, Result};
 use wasm_encoder::{
-    CodeSection, ExportKind, ExportSection, Function, FunctionSection, ImportSection,
-    Module, TypeSection, ValType,
+    CodeSection, ExportKind, ExportSection, Function, FunctionSection, ImportSection, Module,
+    TypeSection, ValType,
 };
 
 extern crate serde_json;
@@ -222,7 +222,7 @@ pub fn validate_wasm(wasm_bytes: &[u8]) -> Result<()> {
         return Err(CompilerError::Other("WASM too short".to_string()));
     }
 
-    if &wasm_bytes[0..4] != &[0x00, 0x61, 0x73, 0x6d] {
+    if wasm_bytes[0..4] != [0x00, 0x61, 0x73, 0x6d] {
         return Err(CompilerError::Other("Invalid WASM magic number".to_string()));
     }
 
@@ -230,7 +230,7 @@ pub fn validate_wasm(wasm_bytes: &[u8]) -> Result<()> {
         return Err(CompilerError::Other("WASM too short".to_string()));
     }
 
-    if &wasm_bytes[4..8] != &[0x01, 0x00, 0x00, 0x00] {
+    if wasm_bytes[4..8] != [0x01, 0x00, 0x00, 0x00] {
         return Err(CompilerError::Other("Unsupported WASM version".to_string()));
     }
 
@@ -248,20 +248,16 @@ mod tests {
     fn create_test_circuit_ir() -> CircuitIR {
         CircuitIR {
             name: "TestCircuit".to_string(),
-            private_witnesses: vec![
-                ZkField {
-                    name: "secret_value".to_string(),
-                    field_type: ZkType::U64,
-                    constraints: vec![],
-                },
-            ],
-            public_inputs: vec![
-                ZkField {
-                    name: "public_commitment".to_string(),
-                    field_type: ZkType::Bytes32,
-                    constraints: vec![],
-                },
-            ],
+            private_witnesses: vec![ZkField {
+                name: "secret_value".to_string(),
+                field_type: ZkType::U64,
+                constraints: vec![],
+            }],
+            public_inputs: vec![ZkField {
+                name: "public_commitment".to_string(),
+                field_type: ZkType::Bytes32,
+                constraints: vec![],
+            }],
             inter_field_constraints: vec![],
             circuit_config: CircuitConfig::minimal(17).unwrap(),
         }
@@ -273,7 +269,7 @@ mod tests {
         let codegen = WasmCodegen::new(circuit_ir.clone());
 
         assert_eq!(codegen.circuit_ir().name, "TestCircuit");
-        assert_eq!(codegen.config().optimize_size, true);
+        assert!(codegen.config().optimize_size);
         assert_eq!(codegen.config().max_size_bytes, 150_000);
     }
 
@@ -289,9 +285,9 @@ mod tests {
 
         let codegen = WasmCodegen::with_config(circuit_ir, config);
 
-        assert_eq!(codegen.config().optimize_size, false);
+        assert!(!codegen.config().optimize_size);
         assert_eq!(codegen.config().max_size_bytes, 200_000);
-        assert_eq!(codegen.config().debug_symbols, true);
+        assert!(codegen.config().debug_symbols);
     }
 
     #[test]
@@ -318,18 +314,10 @@ mod tests {
         let wasm_bytes = codegen.compile().expect("Compilation should succeed");
 
         // Check WASM magic number: "\0asm" (0x00 0x61 0x73 0x6d)
-        assert_eq!(
-            &wasm_bytes[0..4],
-            &[0x00, 0x61, 0x73, 0x6d],
-            "Invalid WASM magic number"
-        );
+        assert_eq!(&wasm_bytes[0..4], &[0x00, 0x61, 0x73, 0x6d], "Invalid WASM magic number");
 
         // Check WASM version: 1 (0x01 0x00 0x00 0x00)
-        assert_eq!(
-            &wasm_bytes[4..8],
-            &[0x01, 0x00, 0x00, 0x00],
-            "Invalid WASM version"
-        );
+        assert_eq!(&wasm_bytes[4..8], &[0x01, 0x00, 0x00, 0x00], "Invalid WASM version");
     }
 
     #[test]
@@ -408,9 +396,11 @@ mod tests {
                 ZkField { name: "w2".to_string(), field_type: ZkType::U64, constraints: vec![] },
                 ZkField { name: "w3".to_string(), field_type: ZkType::U64, constraints: vec![] },
             ],
-            public_inputs: vec![
-                ZkField { name: "p1".to_string(), field_type: ZkType::Bytes32, constraints: vec![] },
-            ],
+            public_inputs: vec![ZkField {
+                name: "p1".to_string(),
+                field_type: ZkType::Bytes32,
+                constraints: vec![],
+            }],
             inter_field_constraints: vec![],
             circuit_config: CircuitConfig::minimal(17).unwrap(),
         };
