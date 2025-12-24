@@ -2,6 +2,9 @@
 //!
 //! Generates WebAssembly bytecode from CircuitIR for Arbitrum Stylus deployment.
 
+pub mod keys;
+pub mod prover;
+
 use crate::{CircuitIR, CompilerError, Result};
 use wasm_encoder::{
     CodeSection, ExportKind, ExportSection, Function, FunctionSection, ImportSection, Module,
