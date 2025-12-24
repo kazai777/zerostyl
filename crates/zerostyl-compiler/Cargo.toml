@@ -16,7 +16,12 @@ halo2curves = "0.7"
 stylus-sdk = "0.9.0"
 ruint = "=1.12.3"
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 anyhow = "1.0"
 syn = { version = "2.0", features = ["full", "parsing"] }
 quote = "1.0"
 thiserror = "1.0"
+# WASM code generation dependencies
+walrus = "0.22"
+wasm-encoder = "0.220"
+wasmparser = "0.220"
