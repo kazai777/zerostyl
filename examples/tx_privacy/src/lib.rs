@@ -395,4 +395,104 @@ mod tests {
 
         assert_eq!(root, Fp::from(106));
     }
+
+    #[test]
+    fn test_circuit_default() {
+        let circuit = TxPrivacyCircuit::default();
+        let _without_witnesses = circuit.without_witnesses();
+
+        // Just verify it doesn't panic - default creates a circuit with unknown values
+        // We can't easily test the Value enum directly, so just ensure creation succeeds
+        assert_eq!(circuit.merkle_path.len(), MERKLE_DEPTH);
+    }
+
+    #[test]
+    fn test_merkle_depth_constant() {
+        assert_eq!(MERKLE_DEPTH, 32);
+    }
+
+    #[test]
+    #[should_panic(expected = "Merkle path must have depth 32")]
+    fn test_invalid_merkle_path_length() {
+        let randomness_old = Fp::from(42);
+        let randomness_new = Fp::from(84);
+        let invalid_path = vec![Fp::from(0); 10]; // Wrong length
+
+        TxPrivacyCircuit::new(1000, 700, randomness_old, randomness_new, 300, invalid_path);
+    }
+
+    #[test]
+    fn test_zero_amount_transfer() {
+        let k = 10;
+        let balance = 1000u64;
+        let randomness_old = Fp::from(42);
+        let randomness_new = Fp::from(84);
+        let merkle_path: Vec<Fp> = vec![Fp::from(0); MERKLE_DEPTH];
+
+        let circuit = TxPrivacyCircuit::new(
+            balance,
+            balance,
+            randomness_old,
+            randomness_new,
+            0,
+            merkle_path.clone(),
+        );
+
+        let commitment_old =
+            TxPrivacyCircuit::compute_commitment(Fp::from(balance), randomness_old);
+        let commitment_new =
+            TxPrivacyCircuit::compute_commitment(Fp::from(balance), randomness_new);
+        let merkle_root = TxPrivacyCircuit::compute_merkle_root(commitment_old, &merkle_path);
+
+        let public_inputs = vec![commitment_old, commitment_new, merkle_root];
+
+        let prover = MockProver::run(k, &circuit, vec![public_inputs]).unwrap();
+        assert_eq!(prover.verify(), Ok(()));
+    }
+
+    #[test]
+    fn test_full_balance_transfer() {
+        let k = 10;
+        let balance_old = 1000u64;
+        let randomness_old = Fp::from(42);
+        let randomness_new = Fp::from(84);
+        let merkle_path: Vec<Fp> = vec![Fp::from(0); MERKLE_DEPTH];
+
+        let circuit = TxPrivacyCircuit::new(
+            balance_old,
+            0,
+            randomness_old,
+            randomness_new,
+            balance_old,
+            merkle_path.clone(),
+        );
+
+        let commitment_old =
+            TxPrivacyCircuit::compute_commitment(Fp::from(balance_old), randomness_old);
+        let commitment_new = TxPrivacyCircuit::compute_commitment(Fp::from(0), randomness_new);
+        let merkle_root = TxPrivacyCircuit::compute_merkle_root(commitment_old, &merkle_path);
+
+        let public_inputs = vec![commitment_old, commitment_new, merkle_root];
+
+        let prover = MockProver::run(k, &circuit, vec![public_inputs]).unwrap();
+        assert_eq!(prover.verify(), Ok(()));
+    }
+
+    #[test]
+    fn test_commitment_with_zero_randomness() {
+        let balance = Fp::from(500);
+        let randomness = Fp::from(0);
+        let commitment = TxPrivacyCircuit::compute_commitment(balance, randomness);
+
+        assert_eq!(commitment, balance);
+    }
+
+    #[test]
+    fn test_merkle_root_empty_path() {
+        let leaf = Fp::from(100);
+        let path: Vec<Fp> = vec![];
+        let root = TxPrivacyCircuit::compute_merkle_root(leaf, &path);
+
+        assert_eq!(root, leaf);
+    }
 }

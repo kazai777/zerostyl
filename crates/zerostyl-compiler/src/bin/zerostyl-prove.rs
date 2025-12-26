@@ -465,4 +465,48 @@ mod tests {
         // Verify clone works correctly (doesn't panic)
         let _ = cloned.without_witnesses();
     }
+
+    #[test]
+    fn test_show_circuit_info_example() {
+        // Just verify it doesn't panic
+        show_circuit_info("example");
+    }
+
+    #[test]
+    fn test_show_circuit_info_tx_privacy() {
+        show_circuit_info("tx_privacy");
+    }
+
+    #[test]
+    fn test_show_circuit_info_state_mask() {
+        show_circuit_info("state_mask");
+    }
+
+    #[test]
+    fn test_show_circuit_info_unknown() {
+        show_circuit_info("unknown_circuit");
+    }
+
+    #[test]
+    fn test_example_circuit_synthesize() {
+        use halo2_proofs::plonk::{Circuit, ConstraintSystem};
+
+        let circuit = ExampleCircuit { a: Value::known(Fp::from(2)), b: Value::known(Fp::from(3)) };
+        let _ = ExampleCircuit::configure(&mut ConstraintSystem::default());
+        let _ = circuit.without_witnesses();
+    }
+
+    #[test]
+    fn test_witness_data_with_multiple_public() {
+        let data = WitnessData {
+            private: vec!["10".to_string(), "20".to_string()],
+            public: vec![vec!["30".to_string()], vec!["40".to_string()]],
+        };
+
+        let json = serde_json::to_string(&data).unwrap();
+        let deserialized: WitnessData = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.private, data.private);
+        assert_eq!(deserialized.public, data.public);
+    }
 }

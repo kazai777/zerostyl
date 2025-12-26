@@ -881,3 +881,85 @@ fn test_circuit_with_six_public_inputs() {
 
     assert_eq!(circuit.ir.public_inputs.len(), 6);
 }
+
+#[test]
+fn test_with_public_inputs_wrong_count() {
+    let input = "struct Test { #[zk_private] x: u64 }";
+    let parsed = parse_contract(input).unwrap();
+    let mut ir = transform_to_ir(parsed).unwrap();
+
+    use zerostyl_compiler::ZkField;
+    ir.public_inputs.push(ZkField {
+        name: "pub1".to_string(),
+        field_type: zerostyl_compiler::ZkType::U64,
+        constraints: vec![],
+    });
+
+    let builder = CircuitBuilder::new(ir);
+    let circuit = builder.build::<TestField>();
+
+    // Try to set 2 public inputs when only 1 is expected
+    let result = circuit.with_public_inputs(vec![TestField::from(1), TestField::from(2)]);
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(err.to_string().contains("Expected 1 public inputs but got 2"));
+}
+
+#[test]
+fn test_with_public_inputs_success() {
+    use halo2_proofs::dev::MockProver;
+
+    let input = "struct Test { #[zk_private] x: u64 }";
+    let parsed = parse_contract(input).unwrap();
+    let mut ir = transform_to_ir(parsed).unwrap();
+
+    use zerostyl_compiler::ZkField;
+    ir.public_inputs.push(ZkField {
+        name: "pub1".to_string(),
+        field_type: zerostyl_compiler::ZkType::U64,
+        constraints: vec![],
+    });
+
+    let builder = CircuitBuilder::new(ir);
+    let circuit = builder
+        .build::<TestField>()
+        .with_witnesses(vec![TestField::from(42)])
+        .unwrap()
+        .with_public_inputs(vec![TestField::from(100)])
+        .unwrap();
+
+    assert_eq!(circuit.ir.public_inputs.len(), 1);
+
+    // Verify the circuit can be proven
+    let k = 10;
+    let public_inputs = vec![TestField::from(100)];
+    let prover = MockProver::run(k, &circuit, vec![public_inputs]).unwrap();
+    assert_eq!(prover.verify(), Ok(()));
+}
+
+#[test]
+fn test_validate_circuit_array_size_boundary() {
+    use zerostyl_compiler::{CircuitIR, ZkField, ZkType};
+    use zerostyl_runtime::CircuitConfig;
+
+    // Create a circuit with an array that exceeds max size (1025)
+    let oversized_field = ZkField {
+        name: "large_array".to_string(),
+        field_type: ZkType::Array { element_type: Box::new(ZkType::U8), size: 1025 },
+        constraints: vec![],
+    };
+
+    let ir = CircuitIR {
+        name: "OversizedArray".to_string(),
+        private_witnesses: vec![oversized_field],
+        public_inputs: vec![],
+        inter_field_constraints: vec![],
+        circuit_config: CircuitConfig::minimal(10).unwrap(),
+    };
+
+    let result = validate_circuit_ir(&ir);
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(err.to_string().contains("Array size"));
+    assert!(err.to_string().contains("1025"));
+}

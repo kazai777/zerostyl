@@ -365,4 +365,25 @@ mod tests {
             assert!(prover.proving_key().is_some());
         }
     }
+
+    #[test]
+    fn test_prover_new() {
+        let circuit = SimpleCircuit { a: Value::known(Fp::from(2)), b: Value::known(Fp::from(3)) };
+        let prover = NativeProver::new(circuit, "test".to_string(), 4).unwrap();
+        assert!(prover.proving_key().is_none());
+        assert!(prover.verifying_key().is_none());
+    }
+
+    #[test]
+    fn test_prover_verify_without_setup() {
+        let temp_dir = TempDir::new().unwrap();
+        let circuit = SimpleCircuit { a: Value::known(Fp::from(2)), b: Value::known(Fp::from(3)) };
+
+        let prover = NativeProver::with_cache_dir(circuit, 4, temp_dir.path()).unwrap();
+
+        let public_inputs = vec![vec![Fp::from(5)]];
+        let fake_proof = vec![0u8; 100];
+        let result = prover.verify_proof(&fake_proof, &public_inputs);
+        assert!(result.is_err());
+    }
 }

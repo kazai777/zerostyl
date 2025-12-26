@@ -382,4 +382,89 @@ mod tests {
         assert_eq!(reconstructed, value);
         assert_eq!(bits, vec![0, 1, 0, 1, 0, 1, 0, 0]);
     }
+
+    #[test]
+    fn test_circuit_default() {
+        let circuit = StateMaskCircuit::default();
+        let _without_witnesses = circuit.without_witnesses();
+
+        // Just verify it doesn't panic
+        assert_eq!(circuit.range_min, 0);
+        assert_eq!(circuit.range_max, 255);
+    }
+
+    #[test]
+    fn test_range_bits_constant() {
+        assert_eq!(RANGE_BITS, 8);
+    }
+
+    #[test]
+    fn test_commitment_with_zero_randomness() {
+        let value = Fp::from(100);
+        let randomness = Fp::from(0);
+        let commitment = StateMaskCircuit::compute_commitment(value, randomness);
+
+        assert_eq!(commitment, value);
+    }
+
+    #[test]
+    fn test_zero_value() {
+        let k = 10;
+        let value = 0u64;
+        let randomness = Fp::from(123);
+        let range_min = 0u64;
+        let range_max = 255u64;
+
+        let circuit = StateMaskCircuit::new(value, randomness, range_min, range_max);
+        let commitment = StateMaskCircuit::compute_commitment(Fp::from(value), randomness);
+        let public_inputs = vec![commitment];
+
+        let prover = MockProver::run(k, &circuit, vec![public_inputs]).unwrap();
+        assert_eq!(prover.verify(), Ok(()));
+    }
+
+    #[test]
+    fn test_max_8_bit_value() {
+        let k = 10;
+        let value = 255u64;
+        let randomness = Fp::from(123);
+        let range_min = 0u64;
+        let range_max = 255u64;
+
+        let circuit = StateMaskCircuit::new(value, randomness, range_min, range_max);
+        let commitment = StateMaskCircuit::compute_commitment(Fp::from(value), randomness);
+        let public_inputs = vec![commitment];
+
+        let prover = MockProver::run(k, &circuit, vec![public_inputs]).unwrap();
+        assert_eq!(prover.verify(), Ok(()));
+    }
+
+    #[test]
+    fn test_bit_decomposition_powers_of_two() {
+        for power in 0..RANGE_BITS {
+            let value = 1u64 << power;
+            let bits: Vec<u64> = (0..RANGE_BITS).map(|i| (value >> i) & 1).collect();
+            let reconstructed: u64 = bits.iter().enumerate().map(|(i, &bit)| bit << i).sum();
+            assert_eq!(reconstructed, value, "Failed for 2^{}", power);
+        }
+    }
+
+    #[test]
+    fn test_different_ranges() {
+        let k = 10;
+        let value = 50u64;
+        let randomness = Fp::from(999);
+
+        // Test different range configurations
+        let ranges = vec![(0, 100), (25, 75), (50, 60)];
+
+        for (range_min, range_max) in ranges {
+            let circuit = StateMaskCircuit::new(value, randomness, range_min, range_max);
+            let commitment = StateMaskCircuit::compute_commitment(Fp::from(value), randomness);
+            let public_inputs = vec![commitment];
+
+            let prover = MockProver::run(k, &circuit, vec![public_inputs]).unwrap();
+            assert_eq!(prover.verify(), Ok(()));
+        }
+    }
 }

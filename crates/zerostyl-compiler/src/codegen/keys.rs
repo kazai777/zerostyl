@@ -177,4 +177,112 @@ mod tests {
         assert_eq!(loaded.num_public_inputs, metadata.num_public_inputs);
         assert_eq!(loaded.num_private_witnesses, metadata.num_private_witnesses);
     }
+
+    #[test]
+    fn test_load_nonexistent_metadata() {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = KeyManager::new(temp_dir.path()).unwrap();
+
+        let result = manager.load_metadata("nonexistent", 10);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_load_nonexistent_params() {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = KeyManager::new(temp_dir.path()).unwrap();
+
+        // Try to load params that haven't been generated yet
+        let result = manager.load_params(20);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_key_metadata_serialization() {
+        let metadata = KeyMetadata {
+            circuit_name: "test_circuit".to_string(),
+            k: 12,
+            num_public_inputs: 5,
+            num_private_witnesses: 10,
+        };
+
+        let json = serde_json::to_string(&metadata).unwrap();
+        let deserialized: KeyMetadata = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.circuit_name, metadata.circuit_name);
+        assert_eq!(deserialized.k, metadata.k);
+        assert_eq!(deserialized.num_public_inputs, metadata.num_public_inputs);
+        assert_eq!(deserialized.num_private_witnesses, metadata.num_private_witnesses);
+    }
+
+    #[test]
+    fn test_params_caching() {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = KeyManager::new(temp_dir.path()).unwrap();
+
+        let k = 5;
+
+        // Generate params first time
+        let params1 = manager.generate_params(k).unwrap();
+
+        // Load params (should use cached version)
+        let params2 = manager.load_params(k).unwrap();
+
+        assert_eq!(params1.k(), params2.k());
+    }
+
+    #[test]
+    fn test_multiple_k_values() {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = KeyManager::new(temp_dir.path()).unwrap();
+
+        for k in [4, 5, 6, 7] {
+            let params = manager.generate_params(k).unwrap();
+            assert_eq!(params.k(), k);
+        }
+    }
+
+    #[test]
+    fn test_key_manager_cache_dir_creation() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_path = temp_dir.path().join("custom_cache");
+
+        let manager = KeyManager::new(&cache_path).unwrap();
+        assert!(cache_path.exists());
+
+        // Verify we can generate params in the new directory
+        let params = manager.generate_params(4).unwrap();
+        assert_eq!(params.k(), 4);
+    }
+
+    #[test]
+    fn test_metadata_with_different_circuits() {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = KeyManager::new(temp_dir.path()).unwrap();
+
+        let metadata1 = KeyMetadata {
+            circuit_name: "circuit1".to_string(),
+            k: 10,
+            num_public_inputs: 2,
+            num_private_witnesses: 4,
+        };
+
+        let metadata2 = KeyMetadata {
+            circuit_name: "circuit2".to_string(),
+            k: 10,
+            num_public_inputs: 3,
+            num_private_witnesses: 6,
+        };
+
+        manager.save_metadata(&metadata1).unwrap();
+        manager.save_metadata(&metadata2).unwrap();
+
+        let loaded1 = manager.load_metadata("circuit1", 10).unwrap();
+        let loaded2 = manager.load_metadata("circuit2", 10).unwrap();
+
+        assert_eq!(loaded1.circuit_name, "circuit1");
+        assert_eq!(loaded2.circuit_name, "circuit2");
+        assert_eq!(loaded1.num_private_witnesses, 4);
+        assert_eq!(loaded2.num_private_witnesses, 6);
+    }
 }
