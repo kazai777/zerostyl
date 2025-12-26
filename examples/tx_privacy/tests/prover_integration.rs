@@ -6,10 +6,7 @@
 use halo2curves::pasta::Fp;
 use tempfile::TempDir;
 use tx_privacy::TxPrivacyCircuit;
-use zerostyl_compiler::codegen::{
-    keys::KeyMetadata,
-    prover::NativeProver,
-};
+use zerostyl_compiler::codegen::{keys::KeyMetadata, prover::NativeProver};
 
 #[test]
 fn test_tx_privacy_with_native_prover() {
@@ -34,8 +31,10 @@ fn test_tx_privacy_with_native_prover() {
     );
 
     // Compute public inputs
-    let commitment_old = TxPrivacyCircuit::compute_commitment(Fp::from(balance_old), randomness_old);
-    let commitment_new = TxPrivacyCircuit::compute_commitment(Fp::from(balance_new), randomness_new);
+    let commitment_old =
+        TxPrivacyCircuit::compute_commitment(Fp::from(balance_old), randomness_old);
+    let commitment_new =
+        TxPrivacyCircuit::compute_commitment(Fp::from(balance_new), randomness_new);
     let merkle_root = TxPrivacyCircuit::compute_merkle_root(commitment_old, &merkle_path);
 
     let public_inputs = vec![vec![commitment_old, commitment_new, merkle_root]];
@@ -77,9 +76,9 @@ fn test_tx_privacy_different_amounts() {
     let temp_dir = TempDir::new().unwrap();
 
     let test_cases = vec![
-        (1000u64, 900u64, 100u64),  // Small transfer
-        (1000u64, 500u64, 500u64),  // Medium transfer
-        (1000u64, 1u64, 999u64),    // Large transfer
+        (1000u64, 900u64, 100u64), // Small transfer
+        (1000u64, 500u64, 500u64), // Medium transfer
+        (1000u64, 1u64, 999u64),   // Large transfer
     ];
 
     for (balance_old, balance_new, amount) in test_cases {
@@ -98,8 +97,10 @@ fn test_tx_privacy_different_amounts() {
             merkle_path.clone(),
         );
 
-        let commitment_old = TxPrivacyCircuit::compute_commitment(Fp::from(balance_old), randomness_old);
-        let commitment_new = TxPrivacyCircuit::compute_commitment(Fp::from(balance_new), randomness_new);
+        let commitment_old =
+            TxPrivacyCircuit::compute_commitment(Fp::from(balance_old), randomness_old);
+        let commitment_new =
+            TxPrivacyCircuit::compute_commitment(Fp::from(balance_new), randomness_new);
         let merkle_root = TxPrivacyCircuit::compute_merkle_root(commitment_old, &merkle_path);
 
         let public_inputs = vec![vec![commitment_old, commitment_new, merkle_root]];
