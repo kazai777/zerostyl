@@ -413,4 +413,110 @@ mod tests {
 
         validate_wasm(&wasm_bytes).expect("Should be valid WASM");
     }
+
+    #[test]
+    fn test_codegen_config_default() {
+        let config = CodegenConfig::default();
+        assert!(config.optimize_size);
+        assert_eq!(config.max_size_bytes, 150_000);
+        assert!(!config.debug_symbols);
+        assert_eq!(config.stylus_version, "0.9.0");
+    }
+
+    #[test]
+    fn test_circuit_metadata() {
+        let metadata = CircuitMetadata {
+            name: "TestCircuit".to_string(),
+            num_witnesses: 10,
+            num_public_inputs: 3,
+            k_param: 17,
+            compiler_version: "0.1.0".to_string(),
+        };
+
+        assert_eq!(metadata.name, "TestCircuit");
+        assert_eq!(metadata.num_witnesses, 10);
+        assert_eq!(metadata.num_public_inputs, 3);
+        assert_eq!(metadata.k_param, 17);
+    }
+
+    #[test]
+    fn test_validate_wasm_wrong_version() {
+        // Valid magic but wrong version
+        let invalid_wasm = vec![0x00, 0x61, 0x73, 0x6d, 0x02, 0x00, 0x00, 0x00];
+        let result = validate_wasm(&invalid_wasm);
+
+        // Should fail validation due to unsupported version
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_estimate_size_scales_with_witnesses() {
+        let base_circuit = CircuitIR {
+            name: "Base".to_string(),
+            private_witnesses: vec![],
+            public_inputs: vec![],
+            inter_field_constraints: vec![],
+            circuit_config: CircuitConfig::minimal(17).unwrap(),
+        };
+
+        let with_witnesses = CircuitIR {
+            name: "WithWitnesses".to_string(),
+            private_witnesses: vec![
+                ZkField { name: "w1".to_string(), field_type: ZkType::U64, constraints: vec![] },
+                ZkField { name: "w2".to_string(), field_type: ZkType::U64, constraints: vec![] },
+            ],
+            public_inputs: vec![],
+            inter_field_constraints: vec![],
+            circuit_config: CircuitConfig::minimal(17).unwrap(),
+        };
+
+        let base_size = WasmCodegen::new(base_circuit).estimate_size();
+        let witness_size = WasmCodegen::new(with_witnesses).estimate_size();
+
+        assert!(witness_size > base_size, "Size should increase with witnesses");
+    }
+
+    #[test]
+    fn test_estimate_size_scales_with_k() {
+        let k10_circuit = CircuitIR {
+            name: "K10".to_string(),
+            private_witnesses: vec![],
+            public_inputs: vec![],
+            inter_field_constraints: vec![],
+            circuit_config: CircuitConfig::minimal(10).unwrap(),
+        };
+
+        let k17_circuit = CircuitIR {
+            name: "K17".to_string(),
+            private_witnesses: vec![],
+            public_inputs: vec![],
+            inter_field_constraints: vec![],
+            circuit_config: CircuitConfig::minimal(17).unwrap(),
+        };
+
+        let k10_size = WasmCodegen::new(k10_circuit).estimate_size();
+        let k17_size = WasmCodegen::new(k17_circuit).estimate_size();
+
+        assert!(k17_size > k10_size, "Size should increase with k parameter");
+    }
+
+    #[test]
+    fn test_compile_with_large_k() {
+        let circuit_ir = CircuitIR {
+            name: "LargeK".to_string(),
+            private_witnesses: vec![ZkField {
+                name: "w".to_string(),
+                field_type: ZkType::U64,
+                constraints: vec![],
+            }],
+            public_inputs: vec![],
+            inter_field_constraints: vec![],
+            circuit_config: CircuitConfig::minimal(20).unwrap(),
+        };
+
+        let codegen = WasmCodegen::new(circuit_ir);
+        let wasm_bytes = codegen.compile().expect("Should compile with large k");
+
+        validate_wasm(&wasm_bytes).expect("Should be valid WASM");
+    }
 }

@@ -284,4 +284,85 @@ mod tests {
         let parsed = string_to_field("12345").unwrap();
         assert_eq!(parsed, field);
     }
+
+    #[test]
+    fn test_string_to_field_hex() {
+        let result = string_to_field("0x1a").unwrap();
+        assert_eq!(result, Fp::from(26));
+
+        let result2 = string_to_field("0xFF").unwrap();
+        assert_eq!(result2, Fp::from(255));
+    }
+
+    #[test]
+    fn test_string_to_field_decimal() {
+        let result = string_to_field("42").unwrap();
+        assert_eq!(result, Fp::from(42));
+
+        let result2 = string_to_field("999").unwrap();
+        assert_eq!(result2, Fp::from(999));
+    }
+
+    #[test]
+    fn test_string_to_field_zero() {
+        let result = string_to_field("0").unwrap();
+        assert_eq!(result, Fp::from(0));
+
+        // Hex needs even number of digits, so use "0x00" instead of "0x0"
+        let result2 = string_to_field("0x00").unwrap();
+        assert_eq!(result2, Fp::from(0));
+    }
+
+    #[test]
+    fn test_string_to_field_invalid() {
+        assert!(string_to_field("invalid").is_err());
+        assert!(string_to_field("").is_err());
+        assert!(string_to_field("0xGG").is_err());
+        // Odd number of hex digits should also fail
+        assert!(string_to_field("0x0").is_err());
+    }
+
+    #[test]
+    fn test_field_to_string_not_empty() {
+        let values = vec![0u64, 1, 42, 255, 1000, 999999];
+        for val in values {
+            let field = Fp::from(val);
+            let s = field_to_string(&field);
+            // Just verify it produces a non-empty string
+            assert!(!s.is_empty(), "String should not be empty for value {}", val);
+        }
+    }
+
+    #[test]
+    fn test_prover_without_setup() {
+        let temp_dir = TempDir::new().unwrap();
+        let circuit = SimpleCircuit { a: Value::known(Fp::from(2)), b: Value::known(Fp::from(3)) };
+
+        let prover = NativeProver::with_cache_dir(circuit, 4, temp_dir.path()).unwrap();
+
+        let public_inputs = vec![vec![Fp::from(5)]];
+        let result = prover.generate_proof(&public_inputs);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_prover_different_k_values() {
+        for k in [4, 5, 6] {
+            let temp_dir = TempDir::new().unwrap();
+            let circuit =
+                SimpleCircuit { a: Value::known(Fp::from(2)), b: Value::known(Fp::from(3)) };
+
+            let mut prover = NativeProver::with_cache_dir(circuit, k, temp_dir.path()).unwrap();
+
+            let metadata = KeyMetadata {
+                circuit_name: format!("simple_k{}", k),
+                k,
+                num_public_inputs: 1,
+                num_private_witnesses: 2,
+            };
+
+            prover.setup(metadata).unwrap();
+            assert!(prover.proving_key().is_some());
+        }
+    }
 }

@@ -363,3 +363,106 @@ fn main() -> Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn test_load_witnesses_valid() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, r#"{{"private": ["2", "3"], "public": [["5"]]}}"#).unwrap();
+
+        let result = load_witnesses(&file.path().to_path_buf());
+        assert!(result.is_ok());
+        let witnesses = result.unwrap();
+        assert_eq!(witnesses.private.len(), 2);
+        assert_eq!(witnesses.private[0], "2");
+        assert_eq!(witnesses.private[1], "3");
+        assert_eq!(witnesses.public.len(), 1);
+        assert_eq!(witnesses.public[0].len(), 1);
+        assert_eq!(witnesses.public[0][0], "5");
+    }
+
+    #[test]
+    fn test_load_witnesses_invalid_json() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, r#"{{"invalid": json}}"#).unwrap();
+
+        let result = load_witnesses(&file.path().to_path_buf());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_load_witnesses_missing_file() {
+        let result = load_witnesses(&PathBuf::from("/nonexistent/file.json"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_load_public_inputs_valid() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, r#"{{"inputs": [["5"], ["10"]]}}"#).unwrap();
+
+        let result = load_public_inputs(&file.path().to_path_buf());
+        assert!(result.is_ok());
+        let inputs = result.unwrap();
+        assert_eq!(inputs.inputs.len(), 2);
+        assert_eq!(inputs.inputs[0][0], "5");
+        assert_eq!(inputs.inputs[1][0], "10");
+    }
+
+    #[test]
+    fn test_load_public_inputs_invalid_json() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "not valid json").unwrap();
+
+        let result = load_public_inputs(&file.path().to_path_buf());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_witness_data_serialization() {
+        let data = WitnessData {
+            private: vec!["1".to_string(), "2".to_string()],
+            public: vec![vec!["3".to_string()]],
+        };
+
+        let json = serde_json::to_string(&data).unwrap();
+        let deserialized: WitnessData = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.private, data.private);
+        assert_eq!(deserialized.public, data.public);
+    }
+
+    #[test]
+    fn test_public_inputs_data_serialization() {
+        let data = PublicInputsData { inputs: vec![vec!["1".to_string(), "2".to_string()]] };
+
+        let json = serde_json::to_string(&data).unwrap();
+        let deserialized: PublicInputsData = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.inputs, data.inputs);
+    }
+
+    #[test]
+    fn test_example_circuit_without_witnesses() {
+        let circuit = ExampleCircuit { a: Value::known(Fp::from(2)), b: Value::known(Fp::from(3)) };
+
+        let _circuit_empty = circuit.without_witnesses();
+        // Verify it creates a new circuit (doesn't panic)
+        // The circuit should have unknown witnesses
+        let _config = ExampleCircuit::configure(&mut ConstraintSystem::default());
+    }
+
+    #[test]
+    fn test_example_circuit_clone() {
+        let circuit = ExampleCircuit { a: Value::known(Fp::from(2)), b: Value::known(Fp::from(3)) };
+
+        let cloned = circuit.clone();
+        // Verify clone works correctly (doesn't panic)
+        let _ = cloned.without_witnesses();
+    }
+}
