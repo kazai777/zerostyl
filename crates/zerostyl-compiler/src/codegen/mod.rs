@@ -4,6 +4,7 @@
 
 pub mod keys;
 pub mod prover;
+pub mod wasm_builder;
 
 use crate::{CircuitIR, CompilerError, Result};
 use wasm_encoder::{

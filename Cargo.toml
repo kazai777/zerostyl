@@ -5,6 +5,7 @@ members = [
     "crates/zerostyl-debugger",
     "crates/zerostyl-exporter",
     "crates/zerostyl-runtime",
+    "crates/zerostyl-verifier",
     "examples/tx_privacy",
     "examples/state_mask",
 ]

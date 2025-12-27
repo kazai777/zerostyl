@@ -1,0 +1,44 @@
+[package]
+name = "zerostyl-verifier"
+version = "0.1.0"
+edition = "2021"
+authors = ["ZeroStyl Team"]
+description = "WASM verifier for ZeroStyl circuits on Arbitrum Stylus"
+license = "MIT OR Apache-2.0"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Halo2 dependencies
+# Disable default features (multicore) for WASM compatibility
+halo2_proofs = { version = "0.3", default-features = false }
+halo2curves = { version = "0.7", features = ["bits", "derive_serde"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+bincode = "1.3"
+
+# WASM support
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }
+
+[dev-dependencies]
+tempfile = "3.0"
+rand = "0.8"
+
+[features]
+default = []
+std = [
+    "serde/std",
+]
+
+[profile.release]
+opt-level = "z"         # Optimize for size
+lto = true              # Link-time optimization
+codegen-units = 1       # Better optimization
+panic = "abort"         # Smaller binary size
+strip = true            # Strip symbols
+
+[profile.dev]
+panic = "abort"
