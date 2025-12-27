@@ -199,8 +199,15 @@ mod tests {
         let instances: Vec<&[Fp]> = public_inputs.iter().map(|v| v.as_slice()).collect();
 
         let mut transcript = Blake2bWrite::<_, EqAffine, Challenge255<_>>::init(vec![]);
-        create_proof(&params, &pk, &[circuit.clone()], &[instances.as_slice()], OsRng, &mut transcript)
-            .expect("proof generation should not fail");
+        create_proof(
+            &params,
+            &pk,
+            std::slice::from_ref(&circuit),
+            &[instances.as_slice()],
+            OsRng,
+            &mut transcript,
+        )
+        .expect("proof generation should not fail");
         let proof = transcript.finalize();
 
         let public_inputs_bytes = bincode::serialize(&public_inputs).unwrap();
@@ -217,12 +224,19 @@ mod tests {
         let vk = keygen_vk(&params, &circuit).expect("vk generation should not fail");
         let pk = keygen_pk(&params, vk.clone(), &circuit).expect("pk generation should not fail");
 
-        let correct_inputs = vec![vec![Fp::from(5)]];
+        let correct_inputs = [vec![Fp::from(5)]];
         let instances: Vec<&[Fp]> = correct_inputs.iter().map(|v| v.as_slice()).collect();
 
         let mut transcript = Blake2bWrite::<_, EqAffine, Challenge255<_>>::init(vec![]);
-        create_proof(&params, &pk, &[circuit.clone()], &[instances.as_slice()], OsRng, &mut transcript)
-            .expect("proof generation should not fail");
+        create_proof(
+            &params,
+            &pk,
+            std::slice::from_ref(&circuit),
+            &[instances.as_slice()],
+            OsRng,
+            &mut transcript,
+        )
+        .expect("proof generation should not fail");
         let proof = transcript.finalize();
 
         let wrong_inputs = vec![vec![Fp::from(10)]];
@@ -245,8 +259,15 @@ mod tests {
         let instances: Vec<&[Fp]> = public_inputs.iter().map(|v| v.as_slice()).collect();
 
         let mut transcript = Blake2bWrite::<_, EqAffine, Challenge255<_>>::init(vec![]);
-        create_proof(&params, &pk, &[circuit.clone()], &[instances.as_slice()], OsRng, &mut transcript)
-            .expect("proof generation should not fail");
+        create_proof(
+            &params,
+            &pk,
+            std::slice::from_ref(&circuit),
+            &[instances.as_slice()],
+            OsRng,
+            &mut transcript,
+        )
+        .expect("proof generation should not fail");
         let mut proof = transcript.finalize();
 
         if !proof.is_empty() {
@@ -266,5 +287,25 @@ mod tests {
         let json_str = String::from_utf8(metadata).unwrap();
         assert!(json_str.contains("ZeroStylCircuit"));
         assert!(json_str.contains("\"k\": 10"));
+    }
+
+    #[test]
+    fn test_load_verifying_key_not_embedded() {
+        let result = load_verifying_key();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().starts_with(b"Verifying key not embedded"));
+    }
+
+    #[test]
+    fn test_load_params_not_embedded() {
+        let result = load_params();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().starts_with(b"Commitment parameters not embedded"));
+    }
+
+    #[test]
+    fn test_verify_halo2_proof_without_vk() {
+        let result = verify_halo2_proof(&[1, 2, 3], &[4, 5, 6]);
+        assert!(result.is_err());
     }
 }

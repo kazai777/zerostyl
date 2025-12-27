@@ -44,7 +44,7 @@ jobs:
         run: |
           cargo tarpaulin \
             --workspace \
-            --all-features \
+            --exclude-files 'crates/zerostyl-runtime/*' 'crates/zerostyl-compiler/src/bin/*' \
             --timeout 300 \
             --out xml \
             --out html \

@@ -12,8 +12,25 @@ pub fn get_metadata() -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
-    fn test_verifier_compiles() {
-        assert!(true);
+    fn test_verify_empty_proof() {
+        let result = verify(&[], &[1, 2, 3]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_verify_empty_inputs() {
+        let result = verify(&[1, 2, 3], &[]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_get_metadata() {
+        let metadata = get_metadata();
+        assert!(!metadata.is_empty());
+        let json_str = String::from_utf8(metadata).unwrap();
+        assert!(json_str.contains("ZeroStylCircuit"));
     }
 }

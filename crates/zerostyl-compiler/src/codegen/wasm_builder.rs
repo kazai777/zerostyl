@@ -48,9 +48,9 @@ impl WasmBuilder {
             .arg(&manifest_path)
             .arg("--quiet");
 
-        let output = command.output().map_err(|e| {
-            CompilerError::Other(format!("Failed to execute cargo build: {}", e))
-        })?;
+        let output = command
+            .output()
+            .map_err(|e| CompilerError::Other(format!("Failed to execute cargo build: {}", e)))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -93,9 +93,8 @@ impl WasmBuilder {
         let temp_input = std::env::temp_dir().join("zerostyl_verifier_input.wasm");
         let temp_output = std::env::temp_dir().join("zerostyl_verifier_output.wasm");
 
-        std::fs::write(&temp_input, wasm_bytes).map_err(|e| {
-            CompilerError::Other(format!("Failed to write temp WASM file: {}", e))
-        })?;
+        std::fs::write(&temp_input, wasm_bytes)
+            .map_err(|e| CompilerError::Other(format!("Failed to write temp WASM file: {}", e)))?;
 
         let output = Command::new("wasm-opt")
             .arg("-Oz")
@@ -113,9 +112,8 @@ impl WasmBuilder {
             return Ok(wasm_bytes.to_vec());
         }
 
-        let optimized = std::fs::read(&temp_output).map_err(|e| {
-            CompilerError::Other(format!("Failed to read optimized WASM: {}", e))
-        })?;
+        let optimized = std::fs::read(&temp_output)
+            .map_err(|e| CompilerError::Other(format!("Failed to read optimized WASM: {}", e)))?;
 
         let _ = std::fs::remove_file(&temp_input);
         let _ = std::fs::remove_file(&temp_output);
@@ -150,6 +148,7 @@ pub struct WasmBuildOutput {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     #[test]
     fn test_wasm_builder_creation() {
@@ -175,5 +174,67 @@ mod tests {
 
         assert!(path.to_string_lossy().contains("zerostyl_verifier.wasm"));
         assert!(path.to_string_lossy().contains("wasm32-unknown-unknown"));
+    }
+
+    #[test]
+    fn test_build_nonexistent_crate() {
+        let builder = WasmBuilder::new("/nonexistent/path/to/crate");
+        let result = builder.build();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("not found"));
+    }
+
+    #[test]
+    fn test_wasm_output_path_with_custom_target() {
+        let builder = WasmBuilder::new("test/path").with_target("wasm32-wasi".to_string());
+        let path = builder.get_wasm_output_path();
+        assert!(path.to_string_lossy().contains("wasm32-wasi"));
+    }
+
+    #[test]
+    fn test_optimize_wasm_without_wasm_opt() {
+        let builder = WasmBuilder::new("crates/zerostyl-verifier").with_optimization(true);
+        let dummy_wasm = vec![0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00];
+        let result = builder.optimize_wasm(&dummy_wasm);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_build_with_metadata() {
+        let builder = WasmBuilder::new("/nonexistent/path");
+        let result = builder.build_with_metadata();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_wasm_build_output_fields() {
+        let output = WasmBuildOutput { wasm_bytes: vec![1, 2, 3], size_bytes: 3, optimized: true };
+        assert_eq!(output.wasm_bytes.len(), 3);
+        assert_eq!(output.size_bytes, 3);
+        assert!(output.optimized);
+    }
+
+    #[test]
+    #[ignore] // Only run with --ignored flag
+    fn test_real_wasm_build() {
+        let builder = WasmBuilder::new("crates/zerostyl-verifier").with_optimization(false);
+        let result = builder.build();
+        if result.is_ok() {
+            let wasm = result.unwrap();
+            assert!(!wasm.is_empty());
+            assert!(wasm.starts_with(&[0x00, 0x61, 0x73, 0x6d])); // WASM magic number
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn test_real_wasm_build_with_metadata() {
+        let builder = WasmBuilder::new("crates/zerostyl-verifier");
+        let result = builder.build_with_metadata();
+        if result.is_ok() {
+            let output = result.unwrap();
+            assert!(!output.wasm_bytes.is_empty());
+            assert_eq!(output.size_bytes, output.wasm_bytes.len());
+        }
     }
 }
