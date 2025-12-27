@@ -148,7 +148,6 @@ pub struct WasmBuildOutput {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
 
     #[test]
     fn test_wasm_builder_creation() {
@@ -219,8 +218,7 @@ mod tests {
     fn test_real_wasm_build() {
         let builder = WasmBuilder::new("crates/zerostyl-verifier").with_optimization(false);
         let result = builder.build();
-        if result.is_ok() {
-            let wasm = result.unwrap();
+        if let Ok(wasm) = result {
             assert!(!wasm.is_empty());
             assert!(wasm.starts_with(&[0x00, 0x61, 0x73, 0x6d])); // WASM magic number
         }
@@ -231,8 +229,7 @@ mod tests {
     fn test_real_wasm_build_with_metadata() {
         let builder = WasmBuilder::new("crates/zerostyl-verifier");
         let result = builder.build_with_metadata();
-        if result.is_ok() {
-            let output = result.unwrap();
+        if let Ok(output) = result {
             assert!(!output.wasm_bytes.is_empty());
             assert_eq!(output.size_bytes, output.wasm_bytes.len());
         }
