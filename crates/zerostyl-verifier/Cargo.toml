@@ -10,21 +10,6 @@ license = "MIT"
 crate-type = ["cdylib", "rlib"]
 
 [[bin]]
-name = "extract-vk"
-path = "tools/extract_vk.rs"
-required-features = ["std"]
-
-[[bin]]
-name = "inspect-vk"
-path = "tools/inspect_vk.rs"
-required-features = ["std"]
-
-[[bin]]
-name = "inspect-vk-detailed"
-path = "tools/inspect_vk_detailed.rs"
-required-features = ["std"]
-
-[[bin]]
 name = "extract-vk-v2"
 path = "tools/extract_vk_v2.rs"
 required-features = ["std"]
