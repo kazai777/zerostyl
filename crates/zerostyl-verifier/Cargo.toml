@@ -19,6 +19,11 @@ halo2curves = { version = "0.7", features = ["bits", "derive_serde"] }
 serde = { version = "1.0", features = ["derive"] }
 bincode = "1.3"
 
+# Stylus SDK (optional, enabled with "stylus" feature)
+stylus-sdk = { version = "0.9", optional = true }
+alloy-primitives = { version = "0.8.20", default-features = false, optional = true }
+mini-alloc = { version = "0.9", optional = true }
+
 # WASM support
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }
@@ -28,9 +33,14 @@ tempfile = "3.0"
 rand = "0.8"
 
 [features]
-default = []
+default = ["std"]
 std = [
     "serde/std",
+]
+stylus = [
+    "stylus-sdk",
+    "alloy-primitives",
+    "mini-alloc",
 ]
 
 [profile.release]
