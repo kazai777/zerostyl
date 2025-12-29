@@ -3,7 +3,12 @@
 use stylus_sdk::{abi::Bytes, prelude::*};
 
 #[cfg(not(feature = "std"))]
-use alloc::{vec, vec::Vec};
+use alloc::vec::Vec;
+
+#[cfg(feature = "std")]
+use std::vec::Vec;
+
+use crate::verifier_nostd;
 
 sol_storage! {
     #[entrypoint]
@@ -12,8 +17,10 @@ sol_storage! {
 
 #[public]
 impl ZeroStylVerifier {
-    pub fn verify(&self, proof: Bytes, public_inputs: Bytes) -> Result<bool, Vec<u8>> {
-        crate::verify(&proof, &public_inputs)
+    pub fn verify(&self, proof: Bytes, _public_inputs: Bytes) -> Result<bool, Vec<u8>> {
+        // TODO: Deserialize public_inputs from bytes to Vec<Vec<Fp>>
+        // For now, use empty inputs as placeholder
+        verifier_nostd::verify_proof_nostd(&proof, &[])
     }
 
     pub fn get_metadata(&self) -> Result<Bytes, Vec<u8>> {

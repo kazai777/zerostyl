@@ -6,16 +6,17 @@
 
 #![cfg_attr(all(not(feature = "std"), not(test)), no_std)]
 
-#[cfg(not(feature = "std"))]
+#[cfg(any(not(feature = "std"), feature = "stylus"))]
 extern crate alloc;
 
 #[cfg(not(feature = "std"))]
-use alloc::{vec, vec::Vec};
+use alloc::vec::Vec;
 
 #[cfg(feature = "std")]
 pub mod verifier;
 
 pub mod verifier_nostd;
+pub mod vk_components;
 
 #[cfg(feature = "stylus")]
 pub mod stylus;
@@ -26,7 +27,7 @@ pub fn verify(proof: &[u8], public_inputs: &[u8]) -> Result<bool, Vec<u8>> {
 }
 
 #[cfg(not(feature = "std"))]
-pub fn verify(proof: &[u8], public_inputs: &[u8]) -> Result<bool, Vec<u8>> {
+pub fn verify(proof: &[u8], _public_inputs: &[u8]) -> Result<bool, Vec<u8>> {
     // For no_std, we need to deserialize public_inputs first
     // TODO: Implement proper deserialization
     verifier_nostd::verify_proof_nostd(proof, &[])

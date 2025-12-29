@@ -2,12 +2,32 @@
 name = "zerostyl-verifier"
 version = "0.1.0"
 edition = "2021"
-authors = ["ZeroStyl Team"]
+authors = ["kazai777 <kazai777.dev@gmail.com"]
 description = "WASM verifier for ZeroStyl circuits on Arbitrum Stylus"
-license = "MIT OR Apache-2.0"
+license = "MIT"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "extract-vk"
+path = "tools/extract_vk.rs"
+required-features = ["std"]
+
+[[bin]]
+name = "inspect-vk"
+path = "tools/inspect_vk.rs"
+required-features = ["std"]
+
+[[bin]]
+name = "inspect-vk-detailed"
+path = "tools/inspect_vk_detailed.rs"
+required-features = ["std"]
+
+[[bin]]
+name = "extract-vk-v2"
+path = "tools/extract_vk_v2.rs"
+required-features = ["std"]
 
 [dependencies]
 # Halo2 dependencies
@@ -19,23 +39,37 @@ halo2curves = { version = "0.7", features = ["bits", "derive_serde"] }
 serde = { version = "1.0", features = ["derive"] }
 bincode = "1.3"
 
+# Cryptography (no_std compatible)
+blake2 = { version = "0.10", default-features = false }
+
+# Regex for VK extraction tools (only needed with std)
+regex = { version = "1.10", optional = true }
+
 # Stylus SDK (optional, enabled with "stylus" feature)
 stylus-sdk = { version = "0.9", optional = true }
 alloy-primitives = { version = "0.8.20", default-features = false, optional = true }
 mini-alloc = { version = "0.9", optional = true }
 
+
 # WASM support
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }
 
+[build-dependencies]
+halo2_proofs = "0.3"
+halo2curves = { version = "0.7", features = ["bits", "derive_serde"] }
+regex = "1.10"
+
 [dev-dependencies]
 tempfile = "3.0"
 rand = "0.8"
+regex = "1.10"
 
 [features]
 default = ["std"]
 std = [
     "serde/std",
+    "regex",
 ]
 stylus = [
     "stylus-sdk",
