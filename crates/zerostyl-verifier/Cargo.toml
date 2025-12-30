@@ -61,6 +61,7 @@ stylus = [
     "alloy-primitives",
     "mini-alloc",
 ]
+embedded_vk = []  # Enable VK embedding at build time
 
 [profile.release]
 opt-level = "z"         # Optimize for size

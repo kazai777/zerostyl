@@ -3,7 +3,7 @@
 use stylus_sdk::{abi::Bytes, prelude::*};
 
 #[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
+use alloc::{vec, vec::Vec};
 
 #[cfg(feature = "std")]
 use std::vec::Vec;

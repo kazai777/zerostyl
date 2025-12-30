@@ -241,8 +241,8 @@ fn test_verifier_empty_proof() {
 }
 
 #[test]
-fn test_verifier_empty_inputs() {
+fn test_verifier_without_embedded_vk() {
     let result = verifier_nostd::verify_proof_nostd(&[1, 2, 3], &[]);
     assert!(result.is_err());
-    assert_eq!(result.unwrap_err(), Vec::from(b"Empty public inputs"));
+    assert_eq!(result.unwrap_err(), Vec::from(b"VK not embedded. Enable 'embedded_vk' feature"));
 }
