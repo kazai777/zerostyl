@@ -2,7 +2,7 @@
 name = "zerostyl-verifier"
 version = "0.1.0"
 edition = "2021"
-authors = ["kazai777 <kazai777.dev@gmail.com"]
+authors = ["kazai777 <kazai777.dev@gmail.com>"]
 description = "WASM verifier for ZeroStyl circuits on Arbitrum Stylus"
 license = "MIT"
 
