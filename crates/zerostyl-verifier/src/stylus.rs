@@ -8,8 +8,6 @@ use alloc::{vec, vec::Vec};
 #[cfg(feature = "std")]
 use std::vec::Vec;
 
-use crate::verifier_nostd;
-
 sol_storage! {
     #[entrypoint]
     pub struct ZeroStylVerifier {}
@@ -17,10 +15,10 @@ sol_storage! {
 
 #[public]
 impl ZeroStylVerifier {
-    pub fn verify(&self, proof: Bytes, _public_inputs: Bytes) -> Result<bool, Vec<u8>> {
-        // TODO: Deserialize public_inputs from bytes to Vec<Vec<Fp>>
-        // For now, use empty inputs as placeholder
-        verifier_nostd::verify_proof_nostd(&proof, &[])
+    pub fn verify(&self, _proof: Bytes, _public_inputs: Bytes) -> Result<bool, Vec<u8>> {
+        // TODO: Implement verification with VK passed as parameter or stored in contract storage
+        // Current limitation: embedded_vk feature not yet working
+        Err(Vec::from(b"Verification not yet implemented - VK embedding in progress"))
     }
 
     pub fn get_metadata(&self) -> Result<Bytes, Vec<u8>> {

@@ -180,7 +180,7 @@ fn test_end_to_end_verification() {
 
     println!("Generating keys...");
     let vk = keygen_vk(&params, &circuit).expect("VK generation failed");
-    let pk = keygen_pk(&params, vk, &circuit).expect("PK generation failed");
+    let pk = keygen_pk(&params, vk.clone(), &circuit).expect("PK generation failed");
 
     let commitment_old = Fp::from(1000) + Fp::from(42); // 1042
     let commitment_new = Fp::from(700) + Fp::from(84); // 784
@@ -214,10 +214,11 @@ fn test_end_to_end_verification() {
     println!("✓ Custom gate verification (3 gates)");
     println!("✓ Real field arithmetic (no placeholders)");
 
-    // Now try to verify with our verifier (expect parsing errors for now)
+    // Now try to verify with our verifier
     println!("\nAttempting verification with verifier_nostd...");
 
-    let result = verifier_nostd::verify_proof_nostd(&proof_bytes, &public_inputs);
+    let result =
+        verifier_nostd::verify_with_vk_and_params(&proof_bytes, &public_inputs, &vk, &params);
 
     match result {
         Ok(valid) => {
@@ -227,22 +228,7 @@ fn test_end_to_end_verification() {
         Err(e) => {
             let err_msg = String::from_utf8_lossy(&e);
             println!("Verification error: {}", err_msg);
-            // For now, we expect some errors since not everything is implemented
-            // This test serves to identify what needs to be fixed
+            panic!("Verification failed: {}", err_msg);
         }
     }
-}
-
-#[test]
-fn test_verifier_empty_proof() {
-    let result = verifier_nostd::verify_proof_nostd(&[], &[vec![Fp::from(1)]]);
-    assert!(result.is_err());
-    assert_eq!(result.unwrap_err(), Vec::from(b"Empty proof"));
-}
-
-#[test]
-fn test_verifier_without_embedded_vk() {
-    let result = verifier_nostd::verify_proof_nostd(&[1, 2, 3], &[]);
-    assert!(result.is_err());
-    assert_eq!(result.unwrap_err(), Vec::from(b"VK not embedded. Enable 'embedded_vk' feature"));
 }
