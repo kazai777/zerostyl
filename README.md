@@ -77,64 +77,84 @@ ZeroStyl enables privacy-preserving applications across DeFi, gaming, and beyond
 
 ## Quick Start
 
+### Try It Yourself (2 Commands)
+
+```bash
+# 1. Clone and build
+git clone https://github.com/kazai777/zerostyl.git && cd zerostyl && cargo build --release
+
+# 2. Run the privacy circuit demo
+cargo run --example tx_privacy_demo -p tx_privacy
+```
+
 ### Prerequisites
 
 - **Rust 1.70+** ([install from rustup.rs](https://rustup.rs/))
 - **Git**
 
-### Installation
+### Full Installation
 
 ```bash
 # Clone the repository
 git clone https://github.com/kazai777/zerostyl.git
 cd zerostyl
 
-# Run setup script (installs tools, builds workspace, runs tests)
-./scripts/setup.sh
+# Build and test everything
+cargo build --workspace --release
+cargo test --workspace
 
-# Verify installation
-./scripts/check.sh
+# Run benchmarks
+cargo bench -p tx_privacy
+cargo bench -p state_mask
 ```
 
-### Current Status
-
-The project is currently in **Phase 0 - Infrastructure ✅** (completed).
-
-The `zerostyl-runtime` crate is functional and ready to use:
+### Example: Private Transfer Circuit
 
 ```rust
-use zerostyl_runtime::{ZkProof, Commitment, CircuitConfig};
+use tx_privacy::{TxPrivacyCircuit, MERKLE_DEPTH};
+use halo2curves::pasta::Fp;
 
-// Create a zero-knowledge proof
-let proof = ZkProof::new(vec![1, 2, 3, 4]);
-println!("Proof size: {} bytes", proof.size());
-
-// Create a Pedersen commitment
-let commitment = Commitment::new(
-    vec![100, 200],  // value
-    vec![50, 75]     // randomness
+// Create a private transfer: 1000 -> 700 (amount: 300)
+let circuit = TxPrivacyCircuit::new(
+    1000,                           // balance_old
+    700,                            // balance_new
+    Fp::from(42),                   // randomness_old
+    Fp::from(84),                   // randomness_new
+    300,                            // amount
+    vec![Fp::from(0); MERKLE_DEPTH] // merkle_path (depth 32)
 );
 
-// Configure a zk-SNARK circuit
-let mut config = CircuitConfig::minimal(17); // 2^17 rows
-config.add_param("max_transfers".to_string(), "10".to_string());
-println!("Circuit has {} rows", config.num_rows());
+// Generate and verify proof
+let prover = NativeProver::new(circuit, 10)?;
+let proof = prover.generate_proof(&public_inputs)?;
+assert!(prover.verify_proof(&proof, &public_inputs)?);
 ```
 
-**Next:** Milestone 1 implementation starts with the `zk-compiler` (halo2 circuit parser and WASM compilation).
+### Example: Range Proof Circuit
+
+```rust
+use state_mask::StateMaskCircuit;
+use halo2curves::pasta::Fp;
+
+// Prove value 42 is in range [0, 255] without revealing it
+let circuit = StateMaskCircuit::new(
+    42,             // secret value
+    Fp::from(123),  // randomness
+    0,              // range_min
+    255             // range_max
+);
+```
 
 ---
 
 ## Project Status
 
-| Phase | Status | Timeline |
-|-------|--------|----------|
-| **Phase 0: Infrastructure** | ✅ Complete | Weeks 1-2 |
-| **Milestone 1: zk-Compiler** | 🚧 In Progress | Months 1-2 |
-| **Milestone 2: Privacy Debugger** | ⏳ Planned | Months 3-4 |
-| **Milestone 3: ABI Exporter** | ⏳ Planned | Months 5-6 |
-
-**Current Focus:** Building the core compiler infrastructure and halo2 integration.
+| Phase | Status |
+|-------|--------|
+| **Phase 0: Infrastructure** | ✅ Complete |
+| **Milestone 1: zk-Compiler** | ✅ Complete |
+| **Milestone 2: Privacy Debugger** | ⏳ Planned |
+| **Milestone 3: ABI Exporter** | ⏳ Planned |
 
 ---
 
@@ -179,24 +199,6 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for more details on the archite
 
 ## Development
 
-### Using Scripts
-
-We provide helper scripts for common development tasks:
-
-```bash
-# Setup development environment (first time only)
-./scripts/setup.sh
-
-# Run all tests with coverage
-./scripts/test.sh
-
-# Full validation (build + test + clippy + fmt)
-./scripts/check.sh
-
-# Clean build artifacts
-./scripts/clean.sh
-```
-
 ### Manual Commands
 
 ```bash
@@ -214,26 +216,6 @@ cargo fmt --all
 
 # Generate documentation
 cargo doc --workspace --no-deps --open
-```
-
-### Project Structure
-
-```
-zerostyl/
-├── crates/
-│   ├── zerostyl-compiler/    # M1: zk-SNARK compiler (in development)
-│   ├── zerostyl-debugger/    # M2: Privacy debugger (planned)
-│   ├── zerostyl-exporter/    # M3: ABI exporter (planned)
-│   └── zerostyl-runtime/     # ✅ Shared runtime (completed - 29 tests)
-├── docs/                     # Architecture & contribution guides
-│   ├── ARCHITECTURE.md       # Technical deep dive
-│   └── CONTRIBUTING.md       # Contributor guidelines
-├── scripts/                  # Development utilities
-│   ├── setup.sh              # Initial setup
-│   ├── test.sh               # Run tests + coverage
-│   ├── check.sh              # Pre-commit validation
-│   └── clean.sh              # Clean workspace
-└── examples/                 # Example circuits (coming in M1)
 ```
 
 ---
@@ -262,10 +244,3 @@ This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) 
 - **GitHub Issues**: [Report bugs or request features](https://github.com/kazai777/zerostyl/issues)
 - **Discussions**: [Join the conversation](https://github.com/kazai777/zerostyl/discussions)
 
----
-
-<div align="center">
-
-**Built with ❤️ for the privacy-first Web3 future**
-
-</div>
