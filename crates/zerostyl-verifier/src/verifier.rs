@@ -50,21 +50,17 @@ pub fn verify_with_vk_and_params(
 }
 
 fn deserialize_public_inputs(inputs_bytes: &[u8]) -> Result<Vec<Vec<Fp>>, VerifyError> {
-    bincode::deserialize(inputs_bytes)
+    postcard::from_bytes(inputs_bytes)
         .map_err(|e| Vec::from(format!("Failed to deserialize public inputs: {}", e).as_bytes()))
 }
 
 fn load_verifying_key() -> Result<VerifyingKey<EqAffine>, VerifyError> {
-    // TODO: Embed VK at compile time
-    // const VK_BYTES: &[u8] = include_bytes!("../vk.bin");
-    // bincode::deserialize(VK_BYTES).map_err(...)
+    // NOTE: VK embedding deferred to M2. Use verify_with_vk() or verify_with_vk_and_params() instead.
     Err(Vec::from(b"Verifying key not embedded"))
 }
 
 fn load_params() -> Result<Params<EqAffine>, VerifyError> {
-    // TODO: Embed params at compile time
-    // const PARAMS_BYTES: &[u8] = include_bytes!("../params_k10.bin");
-    // bincode::deserialize(PARAMS_BYTES).map_err(...)
+    // NOTE: Params embedding deferred to M2. Use verify_with_vk_and_params() instead.
     Err(Vec::from(b"Commitment parameters not embedded"))
 }
 
@@ -94,7 +90,6 @@ mod tests {
     use halo2curves::pasta::EqAffine;
     use rand::rngs::OsRng;
 
-    // Simple test circuit: constrains that a + b = sum
     #[derive(Clone, Debug)]
     struct SimpleCircuit {
         a: Value<Fp>,
@@ -169,7 +164,7 @@ mod tests {
     #[test]
     fn test_deserialize_public_inputs() {
         let inputs = vec![vec![Fp::from(1), Fp::from(2)], vec![Fp::from(3)]];
-        let serialized = bincode::serialize(&inputs).unwrap();
+        let serialized = postcard::to_allocvec(&inputs).unwrap();
         let deserialized = deserialize_public_inputs(&serialized).unwrap();
 
         assert_eq!(deserialized.len(), 2);
@@ -210,7 +205,7 @@ mod tests {
         .expect("proof generation should not fail");
         let proof = transcript.finalize();
 
-        let public_inputs_bytes = bincode::serialize(&public_inputs).unwrap();
+        let public_inputs_bytes = postcard::to_allocvec(&public_inputs).unwrap();
         let result = verify_with_vk_and_params(&proof, &public_inputs_bytes, &vk, &params);
         assert!(result.is_ok());
         assert!(result.unwrap());
@@ -240,7 +235,7 @@ mod tests {
         let proof = transcript.finalize();
 
         let wrong_inputs = vec![vec![Fp::from(10)]];
-        let wrong_inputs_bytes = bincode::serialize(&wrong_inputs).unwrap();
+        let wrong_inputs_bytes = postcard::to_allocvec(&wrong_inputs).unwrap();
 
         let result = verify_with_vk_and_params(&proof, &wrong_inputs_bytes, &vk, &params);
         assert!(result.is_ok());
@@ -274,7 +269,7 @@ mod tests {
             proof[0] ^= 0xFF;
         }
 
-        let public_inputs_bytes = bincode::serialize(&public_inputs).unwrap();
+        let public_inputs_bytes = postcard::to_allocvec(&public_inputs).unwrap();
         let result = verify_with_vk_and_params(&proof, &public_inputs_bytes, &vk, &params);
         assert!(result.is_ok());
         assert!(!result.unwrap());

@@ -9,6 +9,17 @@
 #[cfg(any(not(feature = "std"), feature = "stylus"))]
 extern crate alloc;
 
+#[cfg(all(target_arch = "wasm32", not(feature = "std")))]
+mod getrandom_custom {
+    use getrandom::{register_custom_getrandom, Error};
+
+    fn custom_getrandom(_buf: &mut [u8]) -> Result<(), Error> {
+        Err(Error::UNSUPPORTED)
+    }
+
+    register_custom_getrandom!(custom_getrandom);
+}
+
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 
@@ -27,11 +38,16 @@ pub fn verify(proof: &[u8], public_inputs: &[u8]) -> Result<bool, Vec<u8>> {
 }
 
 #[cfg(not(feature = "std"))]
-pub fn verify(proof: &[u8], _public_inputs: &[u8]) -> Result<bool, Vec<u8>> {
-    // For no_std, we need to deserialize public_inputs first
-    // TODO: Implement proper deserialization
-    verifier_nostd::verify_proof_nostd(proof, &[])
+pub fn verify(_proof: &[u8], _public_inputs: &[u8]) -> Result<bool, Vec<u8>> {
+    // For no_std mode without embedded VK, verification requires explicit VK/params.
+    // Use verify_with_vk() instead, or deploy with embedded_vk feature.
+    //
+    // This function returns Err (not panic) to satisfy safety requirements.
+    Err(Vec::from(b"VK not embedded. Use verify_with_vk() or enable embedded_vk feature"))
 }
+
+/// Re-export verify_with_vk_and_params from verifier_nostd for direct access
+pub use verifier_nostd::verify_with_vk_and_params;
 
 #[cfg(feature = "std")]
 pub fn get_metadata() -> Vec<u8> {
@@ -40,7 +56,7 @@ pub fn get_metadata() -> Vec<u8> {
 
 #[cfg(not(feature = "std"))]
 pub fn get_metadata() -> Vec<u8> {
-    // TODO: Implement metadata for no_std mode
+    // NOTE: Hardcoded for M1; dynamic generation deferred to M2
     Vec::from(b"{\"circuit\":\"ZeroStylCircuit\",\"version\":\"0.1.0\"}")
 }
 

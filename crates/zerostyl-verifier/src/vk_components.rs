@@ -1,4 +1,4 @@
-//! VK Components - Custom serialization for no_std verification
+//! VK Components - Serialization for no_std verification
 
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
@@ -8,68 +8,44 @@ use halo2curves::group::GroupEncoding;
 use halo2curves::pasta::{EqAffine, Fp};
 use serde::{Deserialize, Serialize};
 
-/// Serializable VK components extracted from halo2 VerifyingKey
-///
-/// This contains only the essential data needed for verification,
-/// optimized for no_std and minimal size.
+/// Serializable VK components extracted from halo2 VerifyingKey.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VkComponents {
     /// Domain parameter k (n = 2^k)
     pub k: u32,
-
-    /// Extended domain parameter (used for gate evaluation)
+    /// Extended domain parameter
     pub extended_k: u32,
-
-    /// Domain generator omega
+    /// Domain generator omega (32 bytes)
     pub omega: Vec<u8>,
-
-    /// Number of fixed columns
     pub num_fixed_columns: usize,
-
-    /// Number of advice columns
     pub num_advice_columns: usize,
-
-    /// Number of instance columns
     pub num_instance_columns: usize,
-
-    /// Number of selectors
     pub num_selectors: usize,
-
-    /// Fixed commitments (serialized as compressed affine points)
-    /// Each point is 64 bytes (32 bytes x + 32 bytes y)
+    /// Fixed commitments (32 bytes each, compressed)
     pub fixed_commitments: Vec<Vec<u8>>,
-
-    /// Permutation commitments (serialized as compressed affine points)
-    /// Each point is 64 bytes (32 bytes x + 32 bytes y)
+    /// Permutation commitments (32 bytes each, compressed)
     pub permutation_commitments: Vec<Vec<u8>>,
-
-    /// Permutation column indices
-    /// Format: (column_index, column_type) where column_type: 0=Advice, 1=Instance, 2=Fixed
+    /// Permutation columns: (index, type) where type: 0=Advice, 1=Instance, 2=Fixed
     pub permutation_columns: Vec<(usize, u8)>,
 }
 
 impl VkComponents {
-    /// Serialize VK components to bytes
-    pub fn to_bytes(&self) -> Result<Vec<u8>, bincode::Error> {
-        bincode::serialize(self)
+    pub fn to_bytes(&self) -> Result<Vec<u8>, postcard::Error> {
+        postcard::to_allocvec(self)
     }
 
-    /// Deserialize VK components from bytes
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, bincode::Error> {
-        bincode::deserialize(bytes)
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, postcard::Error> {
+        postcard::from_bytes(bytes)
     }
 
-    /// Get domain size (n = 2^k)
     pub fn domain_size(&self) -> usize {
         1 << self.k
     }
 
-    /// Get extended domain size
     pub fn extended_domain_size(&self) -> usize {
         1 << self.extended_k
     }
 
-    /// Deserialize omega as Fp
     pub fn get_omega(&self) -> Result<Fp, &'static str> {
         if self.omega.len() != 32 {
             return Err("Invalid omega length");
@@ -79,51 +55,39 @@ impl VkComponents {
         Option::from(Fp::from_repr(bytes)).ok_or("Failed to deserialize omega")
     }
 
-    /// Deserialize a fixed commitment
     pub fn get_fixed_commitment(&self, index: usize) -> Result<EqAffine, &'static str> {
         if index >= self.fixed_commitments.len() {
             return Err("Fixed commitment index out of bounds");
         }
-
-        let bytes = &self.fixed_commitments[index];
-        deserialize_affine_point(bytes)
+        deserialize_affine_point(&self.fixed_commitments[index])
     }
 
-    /// Deserialize a permutation commitment
     pub fn get_permutation_commitment(&self, index: usize) -> Result<EqAffine, &'static str> {
         if index >= self.permutation_commitments.len() {
             return Err("Permutation commitment index out of bounds");
         }
-
-        let bytes = &self.permutation_commitments[index];
-        deserialize_affine_point(bytes)
+        deserialize_affine_point(&self.permutation_commitments[index])
     }
 
-    /// Get all fixed commitments
     pub fn get_all_fixed_commitments(&self) -> Result<Vec<EqAffine>, &'static str> {
-        self.fixed_commitments.iter().map(|bytes| deserialize_affine_point(bytes)).collect()
+        self.fixed_commitments.iter().map(|b| deserialize_affine_point(b)).collect()
     }
 
-    /// Get all permutation commitments
     pub fn get_all_permutation_commitments(&self) -> Result<Vec<EqAffine>, &'static str> {
-        self.permutation_commitments.iter().map(|bytes| deserialize_affine_point(bytes)).collect()
+        self.permutation_commitments.iter().map(|b| deserialize_affine_point(b)).collect()
     }
 }
 
-/// Serialize an affine point to bytes (compressed format, 32 bytes)
 pub fn serialize_affine_point(point: &EqAffine) -> Vec<u8> {
     point.to_bytes().as_ref().to_vec()
 }
 
-/// Deserialize an affine point from bytes
 fn deserialize_affine_point(bytes: &[u8]) -> Result<EqAffine, &'static str> {
     if bytes.len() != 32 {
-        return Err("Invalid affine point length (expected 32 bytes compressed)");
+        return Err("Invalid affine point length");
     }
-
     let mut fixed_bytes = [0u8; 32];
     fixed_bytes.copy_from_slice(bytes);
-
     Option::from(EqAffine::from_bytes(&fixed_bytes)).ok_or("Failed to deserialize affine point")
 }
 
@@ -378,11 +342,8 @@ mod tests {
 
     #[test]
     fn test_deserialize_affine_point_invalid_length() {
-        let result = deserialize_affine_point(&[1u8; 16]); // Wrong length
+        let result = deserialize_affine_point(&[1u8; 16]);
         assert!(result.is_err());
-        assert_eq!(
-            result.unwrap_err(),
-            "Invalid affine point length (expected 32 bytes compressed)"
-        );
+        assert_eq!(result.unwrap_err(), "Invalid affine point length");
     }
 }

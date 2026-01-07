@@ -1,0 +1,6 @@
+# Rust toolchain for Arbitrum Stylus deployment
+# Required by cargo-stylus for reproducible builds
+
+[toolchain]
+channel = "1.82.0"
+targets = ["wasm32-unknown-unknown"]

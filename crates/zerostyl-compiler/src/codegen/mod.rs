@@ -158,7 +158,7 @@ impl WasmCodegen {
     fn generate_prove_function(&self) -> Result<Function> {
         let mut func = Function::new(vec![]);
 
-        // TODO: Implement halo2 proof generation
+        // NOTE: Dynamic WASM codegen deferred to M2. M1 uses wasm_builder.rs + native prover.
         use wasm_encoder::Instruction;
         func.instruction(&Instruction::I32Const(0));
         func.instruction(&Instruction::End);
@@ -169,7 +169,7 @@ impl WasmCodegen {
     fn generate_verify_function(&self) -> Result<Function> {
         let mut func = Function::new(vec![]);
 
-        // TODO: Implement halo2 proof verification
+        // NOTE: Dynamic WASM codegen deferred to M2. M1 uses wasm_builder.rs + native prover.
         use wasm_encoder::Instruction;
         func.instruction(&Instruction::I32Const(0));
         func.instruction(&Instruction::End);
@@ -180,7 +180,7 @@ impl WasmCodegen {
     fn generate_metadata_function(&self) -> Function {
         let mut func = Function::new(vec![]);
 
-        // TODO: Serialize CircuitMetadata to JSON
+        // NOTE: Metadata serialization deferred to M2. Returns placeholder for now.
         use wasm_encoder::Instruction;
         func.instruction(&Instruction::I32Const(0));
         func.instruction(&Instruction::End);
@@ -307,7 +307,6 @@ mod tests {
         let codegen = WasmCodegen::new(circuit_ir);
         let wasm_bytes = codegen.compile().expect("Compilation should succeed");
 
-        // Should have WASM magic number
         assert!(wasm_bytes.len() >= 8, "WASM too short: {} bytes", wasm_bytes.len());
     }
 
@@ -317,10 +316,8 @@ mod tests {
         let codegen = WasmCodegen::new(circuit_ir);
         let wasm_bytes = codegen.compile().expect("Compilation should succeed");
 
-        // Check WASM magic number: "\0asm" (0x00 0x61 0x73 0x6d)
         assert_eq!(&wasm_bytes[0..4], &[0x00, 0x61, 0x73, 0x6d], "Invalid WASM magic number");
 
-        // Check WASM version: 1 (0x01 0x00 0x00 0x00)
         assert_eq!(&wasm_bytes[4..8], &[0x01, 0x00, 0x00, 0x00], "Invalid WASM version");
     }
 
@@ -330,7 +327,6 @@ mod tests {
         let codegen = WasmCodegen::new(circuit_ir);
         let wasm_bytes = codegen.compile().expect("Compilation should succeed");
 
-        // Should be reasonably sized (not empty, not huge)
         assert!(wasm_bytes.len() > 100, "WASM too small");
         assert!(wasm_bytes.len() < 1_000_000, "WASM too large: {} bytes", wasm_bytes.len());
     }
@@ -341,7 +337,6 @@ mod tests {
         let codegen = WasmCodegen::new(circuit_ir);
         let wasm_bytes = codegen.compile().expect("Compilation should succeed");
 
-        // Should pass validation
         validate_wasm(&wasm_bytes).expect("WASM should be valid");
     }
 
@@ -369,7 +364,6 @@ mod tests {
 
         let estimated = codegen.estimate_size();
 
-        // Should have a reasonable estimate (> 5KB for base, + witnesses, etc.)
         assert!(estimated > 5_000, "Estimate too low: {}", estimated);
         assert!(estimated < 50_000, "Estimate too high: {}", estimated);
     }
@@ -380,11 +374,9 @@ mod tests {
         let codegen = WasmCodegen::new(circuit_ir.clone());
         let wasm_bytes = codegen.compile().expect("Compilation should succeed");
 
-        // Parse WASM to check for metadata section
-        // Note: This is a basic check - full parsing would use wasmparser
+        // NOTE: This is a basic check - full parsing would use wasmparser
         let wasm_str = String::from_utf8_lossy(&wasm_bytes);
 
-        // Should contain circuit name somewhere in metadata
         assert!(
             wasm_str.contains("TestCircuit") || wasm_str.contains("zerostyl"),
             "Metadata not found in WASM"
@@ -442,11 +434,9 @@ mod tests {
 
     #[test]
     fn test_validate_wasm_wrong_version() {
-        // Valid magic but wrong version
         let invalid_wasm = vec![0x00, 0x61, 0x73, 0x6d, 0x02, 0x00, 0x00, 0x00];
         let result = validate_wasm(&invalid_wasm);
 
-        // Should fail validation due to unsupported version
         assert!(result.is_err());
     }
 
