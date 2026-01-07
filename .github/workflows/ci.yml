@@ -44,8 +44,15 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      - name: Run tests
+      # Linux: test all features including stylus
+      - name: Run tests (Linux)
+        if: runner.os == 'Linux'
         run: cargo test --workspace --all-features --verbose
+
+      # macOS/Windows: test without stylus (stylus-sdk is Linux/WASM only)
+      - name: Run tests (macOS/Windows)
+        if: runner.os != 'Linux'
+        run: cargo test --workspace --verbose
 
   # Check code with clippy linter
   clippy:
