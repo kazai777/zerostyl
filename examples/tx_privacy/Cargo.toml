@@ -19,6 +19,7 @@ serde = { version = "1.0", features = ["derive"] }
 [dev-dependencies]
 criterion = "0.5"
 tempfile = "3.0"
+hex = "0.4"
 
 [[bench]]
 name = "circuit_bench"
