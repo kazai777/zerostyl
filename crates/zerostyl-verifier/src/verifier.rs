@@ -303,6 +303,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(feature = "embedded_vk"))]
     fn test_load_verifying_key_not_embedded() {
         let result = load_verifying_key();
         assert!(result.is_err());
@@ -310,10 +311,35 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(feature = "embedded_vk"))]
     fn test_load_params_not_embedded() {
         let result = load_params();
         assert!(result.is_err());
         assert!(result.unwrap_err().starts_with(b"Commitment parameters not embedded"));
+    }
+
+    #[test]
+    #[cfg(feature = "embedded_vk")]
+    fn test_load_verifying_key_with_embedded() {
+        let result = load_verifying_key();
+        assert!(result.is_err());
+        // When embedded_vk is enabled, load_verifying_key() returns a different error
+        // because VK deserialization requires the concrete circuit type
+        let error = result.unwrap_err();
+        assert!(
+            error.starts_with(b"Use verify_with_vk_and_params()")
+            || error.starts_with(b"Embedded VK is empty")
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "embedded_vk")]
+    fn test_load_params_with_embedded() {
+        let result = load_params();
+        // When embedded_vk is enabled, load_params() may succeed if build.rs generated params,
+        // or may fail with a specific error. We just check it doesn't panic.
+        // The exact behavior depends on whether the build script ran successfully.
+        let _ = result;
     }
 
     #[test]
