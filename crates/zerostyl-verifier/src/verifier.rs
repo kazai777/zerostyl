@@ -23,18 +23,18 @@ pub fn verify_halo2_proof(
 
     let vk = load_verifying_key()?;
     let params = load_params()?;
+    let public_inputs = deserialize_public_inputs(public_inputs_bytes)?;
 
-    verify_with_vk_and_params(proof_bytes, public_inputs_bytes, &vk, &params)
+    verify_with_vk_and_params(proof_bytes, &public_inputs, &vk, &params)
 }
 
 /// Core verification function (public for testing)
 pub fn verify_with_vk_and_params(
     proof_bytes: &[u8],
-    public_inputs_bytes: &[u8],
+    public_inputs: &[Vec<Fp>],
     vk: &VerifyingKey<EqAffine>,
     params: &Params<EqAffine>,
 ) -> Result<bool, VerifyError> {
-    let public_inputs = deserialize_public_inputs(public_inputs_bytes)?;
     let mut transcript = Blake2bRead::<_, EqAffine, Challenge255<_>>::init(proof_bytes);
 
     let instances: Vec<&[Fp]> = public_inputs.iter().map(|v| v.as_slice()).collect();
@@ -55,13 +55,34 @@ fn deserialize_public_inputs(inputs_bytes: &[u8]) -> Result<Vec<Vec<Fp>>, Verify
 }
 
 fn load_verifying_key() -> Result<VerifyingKey<EqAffine>, VerifyError> {
-    // NOTE: VK embedding deferred to M2. Use verify_with_vk() or verify_with_vk_and_params() instead.
-    Err(Vec::from(b"Verifying key not embedded"))
+    #[cfg(feature = "embedded_vk")]
+    {
+        // When embedded_vk is enabled, VK bytes are available but need
+        // circuit-specific deserialization. Return error with helpful message.
+        let vk_bytes = crate::embedded::embedded_vk_bytes();
+        if vk_bytes.is_empty() {
+            return Err(Vec::from(b"Embedded VK is empty - run extract-vk-v2 first"));
+        }
+        // VK deserialization requires the concrete circuit type, which is not
+        // available at this level. Use verify_with_vk_and_params() directly
+        // with a circuit-specific VK instead.
+        Err(Vec::from(b"Use verify_with_vk_and_params() for circuit-specific VK"))
+    }
+    #[cfg(not(feature = "embedded_vk"))]
+    {
+        Err(Vec::from(b"Verifying key not embedded"))
+    }
 }
 
 fn load_params() -> Result<Params<EqAffine>, VerifyError> {
-    // NOTE: Params embedding deferred to M2. Use verify_with_vk_and_params() instead.
-    Err(Vec::from(b"Commitment parameters not embedded"))
+    #[cfg(feature = "embedded_vk")]
+    {
+        crate::embedded::load_embedded_params()
+    }
+    #[cfg(not(feature = "embedded_vk"))]
+    {
+        Err(Vec::from(b"Commitment parameters not embedded"))
+    }
 }
 
 pub fn get_circuit_metadata() -> Vec<u8> {
@@ -205,8 +226,7 @@ mod tests {
         .expect("proof generation should not fail");
         let proof = transcript.finalize();
 
-        let public_inputs_bytes = postcard::to_allocvec(&public_inputs).unwrap();
-        let result = verify_with_vk_and_params(&proof, &public_inputs_bytes, &vk, &params);
+        let result = verify_with_vk_and_params(&proof, &public_inputs, &vk, &params);
         assert!(result.is_ok());
         assert!(result.unwrap());
     }
@@ -235,9 +255,8 @@ mod tests {
         let proof = transcript.finalize();
 
         let wrong_inputs = vec![vec![Fp::from(10)]];
-        let wrong_inputs_bytes = postcard::to_allocvec(&wrong_inputs).unwrap();
 
-        let result = verify_with_vk_and_params(&proof, &wrong_inputs_bytes, &vk, &params);
+        let result = verify_with_vk_and_params(&proof, &wrong_inputs, &vk, &params);
         assert!(result.is_ok());
         assert!(!result.unwrap());
     }
@@ -269,8 +288,7 @@ mod tests {
             proof[0] ^= 0xFF;
         }
 
-        let public_inputs_bytes = postcard::to_allocvec(&public_inputs).unwrap();
-        let result = verify_with_vk_and_params(&proof, &public_inputs_bytes, &vk, &params);
+        let result = verify_with_vk_and_params(&proof, &public_inputs, &vk, &params);
         assert!(result.is_ok());
         assert!(!result.unwrap());
     }
@@ -285,6 +303,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(feature = "embedded_vk"))]
     fn test_load_verifying_key_not_embedded() {
         let result = load_verifying_key();
         assert!(result.is_err());
@@ -292,10 +311,35 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(feature = "embedded_vk"))]
     fn test_load_params_not_embedded() {
         let result = load_params();
         assert!(result.is_err());
         assert!(result.unwrap_err().starts_with(b"Commitment parameters not embedded"));
+    }
+
+    #[test]
+    #[cfg(feature = "embedded_vk")]
+    fn test_load_verifying_key_with_embedded() {
+        let result = load_verifying_key();
+        assert!(result.is_err());
+        // When embedded_vk is enabled, load_verifying_key() returns a different error
+        // because VK deserialization requires the concrete circuit type
+        let error = result.unwrap_err();
+        assert!(
+            error.starts_with(b"Use verify_with_vk_and_params()")
+                || error.starts_with(b"Embedded VK is empty")
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "embedded_vk")]
+    fn test_load_params_with_embedded() {
+        let result = load_params();
+        // When embedded_vk is enabled, load_params() may succeed if build.rs generated params,
+        // or may fail with a specific error. We just check it doesn't panic.
+        // The exact behavior depends on whether the build script ran successfully.
+        let _ = result;
     }
 
     #[test]

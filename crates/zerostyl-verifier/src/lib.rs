@@ -29,6 +29,9 @@ pub mod verifier;
 pub mod verifier_nostd;
 pub mod vk_components;
 
+#[cfg(feature = "embedded_vk")]
+pub mod embedded;
+
 #[cfg(feature = "stylus")]
 pub mod stylus;
 
@@ -48,6 +51,9 @@ pub fn verify(_proof: &[u8], _public_inputs: &[u8]) -> Result<bool, Vec<u8>> {
 
 /// Re-export verify_with_vk_and_params from verifier_nostd for direct access
 pub use verifier_nostd::verify_with_vk_and_params;
+
+#[cfg(feature = "std")]
+pub use verifier::verify_halo2_proof;
 
 #[cfg(feature = "std")]
 pub fn get_metadata() -> Vec<u8> {
