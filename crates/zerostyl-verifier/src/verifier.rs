@@ -328,7 +328,7 @@ mod tests {
         let error = result.unwrap_err();
         assert!(
             error.starts_with(b"Use verify_with_vk_and_params()")
-            || error.starts_with(b"Embedded VK is empty")
+                || error.starts_with(b"Embedded VK is empty")
         );
     }
 
