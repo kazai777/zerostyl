@@ -1,14 +1,14 @@
 //! Transaction Privacy Circuit
 //!
 //! Implements zero-knowledge proofs for private token transfers using:
-//! - Pedersen commitments for amount hiding
+//! - Simplified binding commitments for amount hiding
 //! - Merkle tree membership proofs for account verification
 //!
 //! ## Circuit Overview
 //!
 //! Public Inputs:
-//! - commitment_old: Pedersen(balance_old, randomness_old)
-//! - commitment_new: Pedersen(balance_new, randomness_new)
+//! - commitment_old: Commit(balance_old, randomness_old)
+//! - commitment_new: Commit(balance_new, randomness_new)
 //! - merkle_root: Root of account tree
 //!
 //! Private Witnesses:
@@ -18,8 +18,8 @@
 //! - amount: Transfer amount
 //!
 //! Constraints:
-//! 1. commitment_old == Pedersen(balance_old, rand_old)
-//! 2. commitment_new == Pedersen(balance_new, rand_new)
+//! 1. commitment_old == Commit(balance_old, rand_old)
+//! 2. commitment_new == Commit(balance_new, rand_new)
 //! 3. balance_new == balance_old - amount
 //! 4. MerkleVerify(commitment_old, merkle_path, root)
 //! 5. amount > 0
@@ -244,6 +244,12 @@ impl TxPrivacyCircuit {
         }
     }
 
+    /// Compute a simplified binding commitment: commitment = balance + randomness.
+    ///
+    /// NOTE: This is NOT a true Pedersen commitment (which requires elliptic curve
+    /// point arithmetic via EccChip). This simplified form is sufficient for
+    /// demonstrating the circuit pattern but does not provide hiding/binding
+    /// security properties of real Pedersen commitments.
     pub fn compute_commitment(balance: Fp, randomness: Fp) -> Fp {
         balance + randomness
     }

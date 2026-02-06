@@ -6,7 +6,7 @@
 //! ## Circuit Overview
 //!
 //! Public Inputs:
-//! - commitment: Pedersen(value, randomness)
+//! - commitment: Commit(value, randomness)
 //! - range_min: Minimum allowed value
 //! - range_max: Maximum allowed value
 //!
@@ -16,7 +16,7 @@
 //! - bits: Bit decomposition of (value - range_min)
 //!
 //! Constraints:
-//! 1. commitment == Pedersen(value, randomness)
+//! 1. commitment == Commit(value, randomness)
 //! 2. Each bit is boolean: bit * (bit - 1) == 0
 //! 3. Bit decomposition is correct: value - range_min == Σ(bit_i * 2^i)
 //! 4. Range check: value - range_min < range_max - range_min
@@ -248,6 +248,12 @@ impl StateMaskCircuit {
         }
     }
 
+    /// Compute a simplified binding commitment: commitment = value + randomness.
+    ///
+    /// NOTE: This is NOT a true Pedersen commitment (which requires elliptic curve
+    /// point arithmetic via EccChip). This simplified form is sufficient for
+    /// demonstrating the circuit pattern but does not provide hiding/binding
+    /// security properties of real Pedersen commitments.
     pub fn compute_commitment(value: Fp, randomness: Fp) -> Fp {
         value + randomness
     }
