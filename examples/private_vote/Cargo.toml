@@ -1,0 +1,26 @@
+[package]
+name = "private_vote"
+version = "0.1.0"
+edition = "2021"
+authors = ["kazai777 <kazai777.dev@gmail.com>"]
+license = "MIT"
+publish = false
+
+[dependencies]
+zerostyl-compiler = { path = "../../crates/zerostyl-compiler" }
+zerostyl-runtime = { path = "../../crates/zerostyl-runtime" }
+halo2_proofs = { version = "0.3", features = ["dev-graph"] }
+halo2curves = "0.7"
+ff = "0.13"
+group = "0.13"
+rand = "0.8"
+serde = { version = "1.0", features = ["derive"] }
+
+[dev-dependencies]
+criterion = "0.5"
+tempfile = "3.0"
+hex = "0.4"
+
+[[bench]]
+name = "circuit_bench"
+harness = false
