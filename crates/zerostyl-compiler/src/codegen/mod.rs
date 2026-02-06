@@ -158,7 +158,7 @@ impl WasmCodegen {
     fn generate_prove_function(&self) -> Result<Function> {
         let mut func = Function::new(vec![]);
 
-        // NOTE: Dynamic WASM codegen deferred to M2. M1 uses wasm_builder.rs + native prover.
+        // NOTE: Placeholder - dynamic WASM code generation is not yet implemented. Use wasm_builder.rs for real compilation or NativeProver for off-chain proving.
         use wasm_encoder::Instruction;
         func.instruction(&Instruction::I32Const(0));
         func.instruction(&Instruction::End);
@@ -169,7 +169,7 @@ impl WasmCodegen {
     fn generate_verify_function(&self) -> Result<Function> {
         let mut func = Function::new(vec![]);
 
-        // NOTE: Dynamic WASM codegen deferred to M2. M1 uses wasm_builder.rs + native prover.
+        // NOTE: Placeholder - dynamic WASM code generation is not yet implemented. Use wasm_builder.rs for real compilation or NativeProver for off-chain proving.
         use wasm_encoder::Instruction;
         func.instruction(&Instruction::I32Const(0));
         func.instruction(&Instruction::End);
@@ -180,7 +180,7 @@ impl WasmCodegen {
     fn generate_metadata_function(&self) -> Function {
         let mut func = Function::new(vec![]);
 
-        // NOTE: Metadata serialization deferred to M2. Returns placeholder for now.
+        // NOTE: Placeholder - metadata serialization returns a dummy value. Real metadata is embedded via the custom section.
         use wasm_encoder::Instruction;
         func.instruction(&Instruction::I32Const(0));
         func.instruction(&Instruction::End);
