@@ -8,6 +8,9 @@ members = [
     "crates/zerostyl-verifier",
     "examples/tx_privacy",
     "examples/state_mask",
+    "examples/private_vote",
+    "examples/kyc_proof",
+    "examples/dark_pool_order",
 ]
 
 [workspace.package]
