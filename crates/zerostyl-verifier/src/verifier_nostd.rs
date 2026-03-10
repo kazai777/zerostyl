@@ -13,7 +13,9 @@ use halo2_proofs::{
 };
 use halo2curves::pasta::{EqAffine, Fp};
 
+/// Error type for verification failures, encoded as raw bytes for no_std compatibility.
 pub type VerifyError = Vec<u8>;
+/// Result alias using `VerifyError`.
 pub type Result<T> = core::result::Result<T, VerifyError>;
 
 /// Verify a proof with provided VK and params (useful for testing)

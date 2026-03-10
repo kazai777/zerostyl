@@ -49,7 +49,8 @@ pub fn verify_with_vk_and_params(
     }
 }
 
-fn deserialize_public_inputs(inputs_bytes: &[u8]) -> Result<Vec<Vec<Fp>>, VerifyError> {
+/// Deserialize public inputs from postcard-encoded bytes.
+pub(crate) fn deserialize_public_inputs(inputs_bytes: &[u8]) -> Result<Vec<Vec<Fp>>, VerifyError> {
     postcard::from_bytes(inputs_bytes)
         .map_err(|e| Vec::from(format!("Failed to deserialize public inputs: {}", e).as_bytes()))
 }
@@ -57,20 +58,11 @@ fn deserialize_public_inputs(inputs_bytes: &[u8]) -> Result<Vec<Vec<Fp>>, Verify
 fn load_verifying_key() -> Result<VerifyingKey<EqAffine>, VerifyError> {
     #[cfg(feature = "embedded_vk")]
     {
-        // When embedded_vk is enabled, VK bytes are available but need
-        // circuit-specific deserialization. Return error with helpful message.
-        let vk_bytes = crate::embedded::embedded_vk_bytes();
-        if vk_bytes.is_empty() {
-            return Err(Vec::from(b"Embedded VK is empty - run extract-vk-v2 first"));
-        }
-        // VK deserialization requires the concrete circuit type, which is not
-        // available at this level. Use verify_with_vk_and_params() directly
-        // with a circuit-specific VK instead.
-        Err(Vec::from(b"Use verify_with_vk_and_params() for circuit-specific VK"))
+        crate::embedded::load_embedded_vk()
     }
     #[cfg(not(feature = "embedded_vk"))]
     {
-        Err(Vec::from(b"Verifying key not embedded"))
+        Err(Vec::from(b"Verifying key not embedded. Enable embedded_vk feature."))
     }
 }
 
@@ -85,13 +77,14 @@ fn load_params() -> Result<Params<EqAffine>, VerifyError> {
     }
 }
 
+/// Returns JSON metadata describing the reference circuit configuration.
 pub fn get_circuit_metadata() -> Vec<u8> {
     let metadata = r#"{
-        "name": "ZeroStylCircuit",
+        "name": "ReferenceCircuit",
         "version": "0.1.0",
-        "k": 10,
-        "num_public_inputs": 0,
-        "num_private_witnesses": 0
+        "k": 4,
+        "num_public_inputs": 1,
+        "num_private_witnesses": 2
     }"#;
     Vec::from(metadata.as_bytes())
 }
@@ -99,75 +92,45 @@ pub fn get_circuit_metadata() -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::reference_circuit::ReferenceCircuit;
     use halo2_proofs::{
-        circuit::{Layouter, SimpleFloorPlanner, Value},
-        plonk::{
-            create_proof, keygen_pk, keygen_vk, Advice, Circuit, Column, ConstraintSystem, Error,
-            Instance, Selector,
-        },
-        poly::{commitment::Params, Rotation},
+        plonk::{create_proof, keygen_pk, keygen_vk},
+        poly::commitment::Params,
         transcript::{Blake2bWrite, Challenge255},
     };
     use halo2curves::pasta::EqAffine;
     use rand::rngs::OsRng;
 
-    #[derive(Clone, Debug)]
-    struct SimpleCircuit {
-        a: Value<Fp>,
-        b: Value<Fp>,
-    }
+    fn generate_test_proof(
+        a: u64,
+        b: u64,
+        public_sum: u64,
+    ) -> (Vec<u8>, Vec<Vec<Fp>>, VerifyingKey<EqAffine>, Params<EqAffine>) {
+        let k = 4;
+        let circuit = ReferenceCircuit {
+            a: halo2_proofs::circuit::Value::known(Fp::from(a)),
+            b: halo2_proofs::circuit::Value::known(Fp::from(b)),
+        };
+        let params = Params::<EqAffine>::new(k);
+        let vk = keygen_vk(&params, &circuit).expect("VK generation failed");
+        let pk = keygen_pk(&params, vk.clone(), &circuit).expect("PK generation failed");
 
-    #[derive(Clone, Debug)]
-    #[allow(dead_code)]
-    struct SimpleConfig {
-        advice: Column<Advice>,
-        instance: Column<Instance>,
-        selector: Selector,
-    }
+        let public_inputs = vec![vec![Fp::from(public_sum)]];
+        let instances: Vec<&[Fp]> = public_inputs.iter().map(|v| v.as_slice()).collect();
 
-    impl Circuit<Fp> for SimpleCircuit {
-        type Config = SimpleConfig;
-        type FloorPlanner = SimpleFloorPlanner;
+        let mut transcript = Blake2bWrite::<_, EqAffine, Challenge255<_>>::init(vec![]);
+        create_proof(
+            &params,
+            &pk,
+            std::slice::from_ref(&circuit),
+            &[instances.as_slice()],
+            OsRng,
+            &mut transcript,
+        )
+        .expect("Proof generation failed");
+        let proof = transcript.finalize();
 
-        fn without_witnesses(&self) -> Self {
-            Self { a: Value::unknown(), b: Value::unknown() }
-        }
-
-        fn configure(meta: &mut ConstraintSystem<Fp>) -> Self::Config {
-            let advice = meta.advice_column();
-            let instance = meta.instance_column();
-            let selector = meta.selector();
-
-            meta.enable_equality(advice);
-            meta.enable_equality(instance);
-
-            meta.create_gate("add", |meta| {
-                let s = meta.query_selector(selector);
-                let a = meta.query_advice(advice, Rotation::cur());
-                let b = meta.query_advice(advice, Rotation::next());
-                let sum = meta.query_instance(instance, Rotation::cur());
-
-                vec![s * (a + b - sum)]
-            });
-
-            SimpleConfig { advice, instance, selector }
-        }
-
-        fn synthesize(
-            &self,
-            config: Self::Config,
-            mut layouter: impl Layouter<Fp>,
-        ) -> Result<(), Error> {
-            layouter.assign_region(
-                || "add",
-                |mut region| {
-                    config.selector.enable(&mut region, 0)?;
-                    region.assign_advice(|| "a", config.advice, 0, || self.a)?;
-                    region.assign_advice(|| "b", config.advice, 1, || self.b)?;
-                    Ok(())
-                },
-            )
-        }
+        (proof, public_inputs, vk, params)
     }
 
     #[test]
@@ -205,26 +168,7 @@ mod tests {
 
     #[test]
     fn test_verify_with_real_proof() {
-        let k = 4;
-        let circuit = SimpleCircuit { a: Value::known(Fp::from(2)), b: Value::known(Fp::from(3)) };
-        let params = Params::<EqAffine>::new(k);
-        let vk = keygen_vk(&params, &circuit).expect("vk generation should not fail");
-        let pk = keygen_pk(&params, vk.clone(), &circuit).expect("pk generation should not fail");
-
-        let public_inputs = vec![vec![Fp::from(5)]];
-        let instances: Vec<&[Fp]> = public_inputs.iter().map(|v| v.as_slice()).collect();
-
-        let mut transcript = Blake2bWrite::<_, EqAffine, Challenge255<_>>::init(vec![]);
-        create_proof(
-            &params,
-            &pk,
-            std::slice::from_ref(&circuit),
-            &[instances.as_slice()],
-            OsRng,
-            &mut transcript,
-        )
-        .expect("proof generation should not fail");
-        let proof = transcript.finalize();
+        let (proof, public_inputs, vk, params) = generate_test_proof(2, 3, 5);
 
         let result = verify_with_vk_and_params(&proof, &public_inputs, &vk, &params);
         assert!(result.is_ok());
@@ -233,29 +177,9 @@ mod tests {
 
     #[test]
     fn test_verify_with_wrong_public_inputs() {
-        let k = 4;
-        let circuit = SimpleCircuit { a: Value::known(Fp::from(2)), b: Value::known(Fp::from(3)) };
-        let params = Params::<EqAffine>::new(k);
-        let vk = keygen_vk(&params, &circuit).expect("vk generation should not fail");
-        let pk = keygen_pk(&params, vk.clone(), &circuit).expect("pk generation should not fail");
-
-        let correct_inputs = [vec![Fp::from(5)]];
-        let instances: Vec<&[Fp]> = correct_inputs.iter().map(|v| v.as_slice()).collect();
-
-        let mut transcript = Blake2bWrite::<_, EqAffine, Challenge255<_>>::init(vec![]);
-        create_proof(
-            &params,
-            &pk,
-            std::slice::from_ref(&circuit),
-            &[instances.as_slice()],
-            OsRng,
-            &mut transcript,
-        )
-        .expect("proof generation should not fail");
-        let proof = transcript.finalize();
+        let (proof, _, vk, params) = generate_test_proof(2, 3, 5);
 
         let wrong_inputs = vec![vec![Fp::from(10)]];
-
         let result = verify_with_vk_and_params(&proof, &wrong_inputs, &vk, &params);
         assert!(result.is_ok());
         assert!(!result.unwrap());
@@ -263,26 +187,7 @@ mod tests {
 
     #[test]
     fn test_verify_with_corrupted_proof() {
-        let k = 4;
-        let circuit = SimpleCircuit { a: Value::known(Fp::from(2)), b: Value::known(Fp::from(3)) };
-        let params = Params::<EqAffine>::new(k);
-        let vk = keygen_vk(&params, &circuit).expect("vk generation should not fail");
-        let pk = keygen_pk(&params, vk.clone(), &circuit).expect("pk generation should not fail");
-
-        let public_inputs = vec![vec![Fp::from(5)]];
-        let instances: Vec<&[Fp]> = public_inputs.iter().map(|v| v.as_slice()).collect();
-
-        let mut transcript = Blake2bWrite::<_, EqAffine, Challenge255<_>>::init(vec![]);
-        create_proof(
-            &params,
-            &pk,
-            std::slice::from_ref(&circuit),
-            &[instances.as_slice()],
-            OsRng,
-            &mut transcript,
-        )
-        .expect("proof generation should not fail");
-        let mut proof = transcript.finalize();
+        let (mut proof, public_inputs, vk, params) = generate_test_proof(2, 3, 5);
 
         if !proof.is_empty() {
             proof[0] ^= 0xFF;
@@ -298,8 +203,8 @@ mod tests {
         let metadata = get_circuit_metadata();
         assert!(!metadata.is_empty());
         let json_str = String::from_utf8(metadata).unwrap();
-        assert!(json_str.contains("ZeroStylCircuit"));
-        assert!(json_str.contains("\"k\": 10"));
+        assert!(json_str.contains("ReferenceCircuit"));
+        assert!(json_str.contains("\"k\": 4"));
     }
 
     #[test]
@@ -322,29 +227,42 @@ mod tests {
     #[cfg(feature = "embedded_vk")]
     fn test_load_verifying_key_with_embedded() {
         let result = load_verifying_key();
-        assert!(result.is_err());
-        // When embedded_vk is enabled, load_verifying_key() returns a different error
-        // because VK deserialization requires the concrete circuit type
-        let error = result.unwrap_err();
-        assert!(
-            error.starts_with(b"Use verify_with_vk_and_params()")
-                || error.starts_with(b"Embedded VK is empty")
-        );
+        assert!(result.is_ok(), "Should succeed with embedded VK: {:?}", result.err());
     }
 
     #[test]
     #[cfg(feature = "embedded_vk")]
     fn test_load_params_with_embedded() {
         let result = load_params();
-        // When embedded_vk is enabled, load_params() may succeed if build.rs generated params,
-        // or may fail with a specific error. We just check it doesn't panic.
-        // The exact behavior depends on whether the build script ran successfully.
-        let _ = result;
+        assert!(result.is_ok(), "Should succeed with embedded params: {:?}", result.err());
     }
 
     #[test]
     fn test_verify_halo2_proof_without_vk() {
         let result = verify_halo2_proof(&[1, 2, 3], &[4, 5, 6]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    #[cfg(feature = "embedded_vk")]
+    fn test_verify_halo2_proof_end_to_end() {
+        let (proof, public_inputs, _, _) = generate_test_proof(2, 3, 5);
+
+        let public_inputs_bytes = postcard::to_allocvec(&public_inputs).unwrap();
+        let result = verify_halo2_proof(&proof, &public_inputs_bytes);
+        assert!(result.is_ok(), "End-to-end verification failed: {:?}", result.err());
+        assert!(result.unwrap(), "Valid proof should verify as true");
+    }
+
+    #[test]
+    #[cfg(feature = "embedded_vk")]
+    fn test_verify_halo2_proof_wrong_inputs() {
+        let (proof, _, _, _) = generate_test_proof(2, 3, 5);
+
+        let wrong_inputs = vec![vec![Fp::from(999)]];
+        let wrong_inputs_bytes = postcard::to_allocvec(&wrong_inputs).unwrap();
+        let result = verify_halo2_proof(&proof, &wrong_inputs_bytes);
+        assert!(result.is_ok(), "Verification should not error: {:?}", result.err());
+        assert!(!result.unwrap(), "Wrong inputs should verify as false");
     }
 }

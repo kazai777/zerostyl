@@ -1,285 +1,55 @@
 //! Private Vote Circuit
 //!
 //! Implements zero-knowledge proofs for private voting using:
-//! - Simplified binding commitments for balance and vote hiding
+//! - Poseidon commitments for balance and vote hiding (real ZK-friendly hash)
 //! - Range proofs to verify voter eligibility (balance >= threshold)
 //! - Boolean constraint to ensure vote is 0 or 1
 //!
 //! ## Circuit Overview
 //!
 //! Public Inputs:
-//! - balance_commitment: Commit(balance, randomness_balance)
+//! - balance_commitment: Poseidon(balance, randomness_balance)
 //! - voting_threshold: Minimum balance required to vote
-//! - vote_commitment: Commit(vote, randomness_vote)
+//! - vote_commitment: Poseidon(vote, randomness_vote)
 //!
 //! Private Witnesses:
 //! - balance: Voter's token balance
 //! - randomness_balance: Commitment randomness for balance
 //! - vote: The vote value (0 or 1)
 //! - randomness_vote: Commitment randomness for vote
-//! - bits: Bit decomposition of (balance - threshold)
 //!
 //! Constraints:
-//! 1. balance_commitment == balance + randomness_balance
-//! 2. vote is boolean: vote * (vote - 1) == 0
-//! 3. vote_commitment == vote + randomness_vote
-//! 4. Each bit is boolean: bit * (bit - 1) == 0
-//! 5. Bit decomposition: balance - threshold == sum(bit_i * 2^i)
+//! 1. balance_commitment == Poseidon(balance, randomness_balance)
+//! 2. vote is boolean: vote ∈ {0, 1}
+//! 3. vote_commitment == Poseidon(vote, randomness_vote)
+//! 4. balance - threshold ∈ [0, 2^RANGE_BITS) (proves balance >= threshold)
 
 use halo2_proofs::{
-    arithmetic::Field,
-    circuit::{AssignedCell, Chip, Layouter, SimpleFloorPlanner, Value},
+    circuit::{Layouter, SimpleFloorPlanner, Value},
     plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Instance, Selector},
     poly::Rotation,
 };
 use halo2curves::pasta::Fp;
+use zerostyl_compiler::gadgets::{
+    PoseidonCommitmentChip, PoseidonCommitmentConfig, RangeProofChip, RangeProofConfig,
+};
 
+/// Number of bits for the balance-threshold range proof.
 const RANGE_BITS: usize = 8;
 
-#[derive(Clone, Debug)]
+/// Configuration for the private vote circuit.
+#[derive(Debug, Clone)]
 pub struct PrivateVoteConfig {
-    advice: [Column<Advice>; 3],
+    poseidon_config: PoseidonCommitmentConfig,
+    range_config: RangeProofConfig,
+    /// Advice columns for the eligibility gate: [balance, threshold, diff].
+    eligibility_advice: [Column<Advice>; 3],
+    /// Selector for the eligibility gate: `balance - threshold - diff = 0`.
+    eligibility_selector: Selector,
     instance: Column<Instance>,
-    s_commitment: Selector,
-    s_vote_boolean: Selector,
-    s_vote_commit: Selector,
-    s_bit_check: Selector,
-    s_bit_decompose: Selector,
 }
 
-#[derive(Clone, Debug)]
-pub struct PrivateVoteChip {
-    config: PrivateVoteConfig,
-}
-
-impl Chip<Fp> for PrivateVoteChip {
-    type Config = PrivateVoteConfig;
-    type Loaded = ();
-
-    fn config(&self) -> &Self::Config {
-        &self.config
-    }
-
-    fn loaded(&self) -> &Self::Loaded {
-        &()
-    }
-}
-
-impl PrivateVoteChip {
-    pub fn construct(config: PrivateVoteConfig) -> Self {
-        Self { config }
-    }
-
-    pub fn configure(
-        meta: &mut ConstraintSystem<Fp>,
-        advice: [Column<Advice>; 3],
-        instance: Column<Instance>,
-    ) -> PrivateVoteConfig {
-        for col in &advice {
-            meta.enable_equality(*col);
-        }
-        meta.enable_equality(instance);
-
-        let s_commitment = meta.selector();
-        let s_vote_boolean = meta.selector();
-        let s_vote_commit = meta.selector();
-        let s_bit_check = meta.selector();
-        let s_bit_decompose = meta.selector();
-
-        // Commitment gate: balance + randomness - commitment == 0
-        meta.create_gate("commitment", |meta| {
-            let s = meta.query_selector(s_commitment);
-            let balance = meta.query_advice(advice[0], Rotation::cur());
-            let randomness = meta.query_advice(advice[1], Rotation::cur());
-            let commitment = meta.query_advice(advice[2], Rotation::cur());
-
-            vec![s * (balance + randomness - commitment)]
-        });
-
-        // Vote boolean gate: vote * (vote - 1) == 0
-        meta.create_gate("vote_boolean", |meta| {
-            let s = meta.query_selector(s_vote_boolean);
-            let vote = meta.query_advice(advice[0], Rotation::cur());
-            let one = meta.query_advice(advice[1], Rotation::cur());
-
-            vec![s * vote.clone() * (vote - one)]
-        });
-
-        // Vote commitment gate: vote + randomness - commitment == 0
-        meta.create_gate("vote_commit", |meta| {
-            let s = meta.query_selector(s_vote_commit);
-            let vote = meta.query_advice(advice[0], Rotation::cur());
-            let randomness = meta.query_advice(advice[1], Rotation::cur());
-            let commitment = meta.query_advice(advice[2], Rotation::cur());
-
-            vec![s * (vote + randomness - commitment)]
-        });
-
-        // Bit check gate: bit * (bit - 1) == 0
-        meta.create_gate("bit_check", |meta| {
-            let s = meta.query_selector(s_bit_check);
-            let bit = meta.query_advice(advice[0], Rotation::cur());
-            let one = meta.query_advice(advice[1], Rotation::cur());
-
-            vec![s * bit.clone() * (bit - one)]
-        });
-
-        // Bit decomposition: acc_cur + bit * power - acc_next == 0
-        meta.create_gate("bit_decompose", |meta| {
-            let s = meta.query_selector(s_bit_decompose);
-            let bit = meta.query_advice(advice[0], Rotation::cur());
-            let power = meta.query_advice(advice[1], Rotation::cur());
-            let acc_cur = meta.query_advice(advice[2], Rotation::cur());
-            let acc_next = meta.query_advice(advice[2], Rotation::next());
-
-            vec![s * (acc_cur + bit * power - acc_next)]
-        });
-
-        PrivateVoteConfig {
-            advice,
-            instance,
-            s_commitment,
-            s_vote_boolean,
-            s_vote_commit,
-            s_bit_check,
-            s_bit_decompose,
-        }
-    }
-
-    pub fn assign_commitment(
-        &self,
-        mut layouter: impl Layouter<Fp>,
-        value: Value<Fp>,
-        randomness: Value<Fp>,
-    ) -> Result<AssignedCell<Fp, Fp>, Error> {
-        layouter.assign_region(
-            || "commitment",
-            |mut region| {
-                self.config.s_commitment.enable(&mut region, 0)?;
-
-                region.assign_advice(|| "value", self.config.advice[0], 0, || value)?;
-                region.assign_advice(|| "randomness", self.config.advice[1], 0, || randomness)?;
-
-                let commitment = value.zip(randomness).map(|(v, r)| v + r);
-
-                region.assign_advice(|| "commitment", self.config.advice[2], 0, || commitment)
-            },
-        )
-    }
-
-    pub fn assign_vote_boolean(
-        &self,
-        mut layouter: impl Layouter<Fp>,
-        vote: Value<Fp>,
-    ) -> Result<(), Error> {
-        layouter.assign_region(
-            || "vote_boolean",
-            |mut region| {
-                self.config.s_vote_boolean.enable(&mut region, 0)?;
-
-                region.assign_advice(|| "vote", self.config.advice[0], 0, || vote)?;
-                region.assign_advice(
-                    || "one",
-                    self.config.advice[1],
-                    0,
-                    || Value::known(Fp::ONE),
-                )?;
-
-                Ok(())
-            },
-        )
-    }
-
-    pub fn assign_vote_commitment(
-        &self,
-        mut layouter: impl Layouter<Fp>,
-        vote: Value<Fp>,
-        randomness: Value<Fp>,
-    ) -> Result<AssignedCell<Fp, Fp>, Error> {
-        layouter.assign_region(
-            || "vote_commit",
-            |mut region| {
-                self.config.s_vote_commit.enable(&mut region, 0)?;
-
-                region.assign_advice(|| "vote", self.config.advice[0], 0, || vote)?;
-                region.assign_advice(|| "randomness", self.config.advice[1], 0, || randomness)?;
-
-                let commitment = vote.zip(randomness).map(|(v, r)| v + r);
-
-                region.assign_advice(|| "commitment", self.config.advice[2], 0, || commitment)
-            },
-        )
-    }
-
-    pub fn assign_range_proof(
-        &self,
-        mut layouter: impl Layouter<Fp>,
-        bits: Vec<Value<Fp>>,
-    ) -> Result<(), Error> {
-        layouter.assign_region(
-            || "range_proof",
-            |mut region| {
-                let one = Value::known(Fp::ONE);
-
-                for (i, bit) in bits.iter().enumerate() {
-                    self.config.s_bit_check.enable(&mut region, i)?;
-
-                    region.assign_advice(
-                        || format!("bit_{}", i),
-                        self.config.advice[0],
-                        i,
-                        || *bit,
-                    )?;
-                    region.assign_advice(|| "one", self.config.advice[1], i, || one)?;
-                }
-
-                let mut accumulator = Value::known(Fp::ZERO);
-                let offset = bits.len();
-
-                for (i, bit) in bits.iter().enumerate() {
-                    self.config.s_bit_decompose.enable(&mut region, offset + i)?;
-
-                    region.assign_advice(
-                        || format!("bit_decompose_{}", i),
-                        self.config.advice[0],
-                        offset + i,
-                        || *bit,
-                    )?;
-
-                    let power = Fp::from(1u64 << i);
-                    region.assign_advice(
-                        || format!("power_{}", i),
-                        self.config.advice[1],
-                        offset + i,
-                        || Value::known(power),
-                    )?;
-
-                    region.assign_advice(
-                        || format!("acc_{}", i),
-                        self.config.advice[2],
-                        offset + i,
-                        || accumulator,
-                    )?;
-
-                    accumulator = accumulator.zip(*bit).map(|(acc, b)| {
-                        let bit_contrib = b * power;
-                        acc + bit_contrib
-                    });
-                }
-
-                region.assign_advice(
-                    || "final_acc",
-                    self.config.advice[2],
-                    offset + bits.len(),
-                    || accumulator,
-                )?;
-
-                Ok(())
-            },
-        )
-    }
-}
-
+/// Private vote circuit with Poseidon commitments and range proofs.
 #[derive(Clone, Debug)]
 pub struct PrivateVoteCircuit {
     pub balance: Value<Fp>,
@@ -287,7 +57,6 @@ pub struct PrivateVoteCircuit {
     pub vote: Value<Fp>,
     pub randomness_vote: Value<Fp>,
     pub threshold: u64,
-    pub bits: Vec<Value<Fp>>,
 }
 
 impl Default for PrivateVoteCircuit {
@@ -298,7 +67,6 @@ impl Default for PrivateVoteCircuit {
             vote: Value::unknown(),
             randomness_vote: Value::unknown(),
             threshold: 0,
-            bits: vec![Value::unknown(); RANGE_BITS],
         }
     }
 }
@@ -319,32 +87,22 @@ impl PrivateVoteCircuit {
             RANGE_BITS
         );
 
-        let normalized = balance - threshold;
-        let bits: Vec<Value<Fp>> = (0..RANGE_BITS)
-            .map(|i| {
-                let bit = (normalized >> i) & 1;
-                Value::known(Fp::from(bit))
-            })
-            .collect();
-
         Self {
             balance: Value::known(Fp::from(balance)),
             randomness_balance: Value::known(randomness_balance),
             vote: Value::known(Fp::from(vote)),
             randomness_vote: Value::known(randomness_vote),
             threshold,
-            bits,
         }
     }
 
-    /// Compute a simplified binding commitment: commitment = value + randomness.
+    /// Compute a Poseidon commitment: commitment = Poseidon(value, randomness).
     ///
-    /// NOTE: This is NOT a true Pedersen commitment (which requires elliptic curve
-    /// point arithmetic via EccChip). This simplified form is sufficient for
-    /// demonstrating the circuit pattern but does not provide hiding/binding
-    /// security properties of real Pedersen commitments.
+    /// Uses the P128Pow5T3 specification (128-bit security, width=3, rate=2)
+    /// matching halo2_gadgets Poseidon. This provides both hiding and binding
+    /// security properties.
     pub fn compute_commitment(value: Fp, randomness: Fp) -> Fp {
-        value + randomness
+        PoseidonCommitmentChip::hash_outside_circuit(value, randomness)
     }
 }
 
@@ -357,10 +115,35 @@ impl Circuit<Fp> for PrivateVoteCircuit {
     }
 
     fn configure(meta: &mut ConstraintSystem<Fp>) -> Self::Config {
-        let advice = [meta.advice_column(), meta.advice_column(), meta.advice_column()];
+        let poseidon_config = PoseidonCommitmentChip::configure(meta);
+        let range_config = RangeProofChip::configure(meta);
         let instance = meta.instance_column();
+        meta.enable_equality(instance);
 
-        PrivateVoteChip::configure(meta, advice, instance)
+        // Eligibility gate columns: [balance, threshold, diff]
+        let eligibility_advice = [meta.advice_column(), meta.advice_column(), meta.advice_column()];
+        for col in &eligibility_advice {
+            meta.enable_equality(*col);
+        }
+        let eligibility_selector = meta.selector();
+
+        // Gate: balance - threshold - diff = 0
+        // Ensures diff is exactly (balance - threshold), preventing free witness forgery.
+        meta.create_gate("eligibility check", |meta| {
+            let s = meta.query_selector(eligibility_selector);
+            let balance = meta.query_advice(eligibility_advice[0], Rotation::cur());
+            let threshold = meta.query_advice(eligibility_advice[1], Rotation::cur());
+            let diff = meta.query_advice(eligibility_advice[2], Rotation::cur());
+            vec![s * (balance - threshold - diff)]
+        });
+
+        PrivateVoteConfig {
+            poseidon_config,
+            range_config,
+            eligibility_advice,
+            eligibility_selector,
+            instance,
+        }
     }
 
     fn synthesize(
@@ -368,33 +151,105 @@ impl Circuit<Fp> for PrivateVoteCircuit {
         config: Self::Config,
         mut layouter: impl Layouter<Fp>,
     ) -> Result<(), Error> {
-        let chip = PrivateVoteChip::construct(config.clone());
+        let poseidon_chip = PoseidonCommitmentChip::construct(config.poseidon_config.clone());
+        let range_chip = RangeProofChip::construct(config.range_config.clone());
 
-        // 1. Prove balance commitment
-        let balance_commitment_cell = chip.assign_commitment(
-            layouter.namespace(|| "balance_commitment"),
-            self.balance,
+        // 1. Poseidon commitment: balance_commitment = Poseidon(balance, randomness_balance)
+        let balance_cell =
+            poseidon_chip.load_private(layouter.namespace(|| "load balance"), self.balance, 0)?;
+        // Clone for use in eligibility region (commit() consumes the original)
+        let balance_for_eligibility = balance_cell.clone();
+        let randomness_balance_cell = poseidon_chip.load_private(
+            layouter.namespace(|| "load randomness_balance"),
             self.randomness_balance,
+            1,
+        )?;
+        let balance_commitment = poseidon_chip.commit(
+            layouter.namespace(|| "balance commitment"),
+            balance_cell,
+            randomness_balance_cell,
         )?;
 
-        // 2. Prove vote is boolean
-        chip.assign_vote_boolean(layouter.namespace(|| "vote_boolean"), self.vote)?;
-
-        // 3. Prove vote commitment
-        let vote_commitment_cell = chip.assign_vote_commitment(
-            layouter.namespace(|| "vote_commitment"),
-            self.vote,
+        // 2. Load vote into Poseidon and clone for boolean check.
+        //    The clone creates a copy constraint linking the boolean-checked cell
+        //    to the Poseidon commitment input, preventing a malicious prover from
+        //    committing a non-boolean value while passing the boolean check.
+        let vote_cell_poseidon =
+            poseidon_chip.load_private(layouter.namespace(|| "load vote"), self.vote, 0)?;
+        let vote_cell_for_bool = vote_cell_poseidon.clone();
+        let randomness_vote_cell = poseidon_chip.load_private(
+            layouter.namespace(|| "load randomness_vote"),
             self.randomness_vote,
+            1,
+        )?;
+        let vote_commitment = poseidon_chip.commit(
+            layouter.namespace(|| "vote commitment"),
+            vote_cell_poseidon,
+            randomness_vote_cell,
         )?;
 
-        // 4. Prove balance >= threshold via range proof on (balance - threshold)
-        chip.assign_range_proof(layouter.namespace(|| "range_proof"), self.bits.clone())?;
+        // 3. Vote boolean: vote ∈ {0, 1} via 1-bit range check
+        //    Uses the clone of the Poseidon input cell (copy-constrained).
+        range_chip.check_range(layouter.namespace(|| "vote boolean"), vote_cell_for_bool, 1)?;
 
-        // Expose public inputs
-        layouter.constrain_instance(balance_commitment_cell.cell(), config.instance, 0)?;
-        // threshold is public input at index 1 - we don't constrain it from circuit
-        // since it's a known public value
-        layouter.constrain_instance(vote_commitment_cell.cell(), config.instance, 2)?;
+        // 4. Eligibility check: balance - threshold ∈ [0, 2^RANGE_BITS)
+        //
+        // The gate constrains: balance - threshold - diff = 0
+        // - balance is linked to the Poseidon commitment input via copy_advice
+        // - threshold is loaded from public instance[1] via assign_advice_from_instance
+        // - diff is fully determined by the gate (no free witness)
+        //
+        // Then diff is range-checked to prove it fits in RANGE_BITS bits,
+        // which proves balance >= threshold (for values fitting in RANGE_BITS).
+        let threshold_fp = Fp::from(self.threshold);
+        let diff_cell = layouter.assign_region(
+            || "eligibility check",
+            |mut region| {
+                config.eligibility_selector.enable(&mut region, 0)?;
+
+                // Copy balance from Poseidon input cell (permutation-constrained)
+                balance_for_eligibility.copy_advice(
+                    || "balance",
+                    &mut region,
+                    config.eligibility_advice[0],
+                    0,
+                )?;
+
+                // Load threshold from instance column index 1
+                // This creates a copy constraint: advice cell == instance[1]
+                region.assign_advice_from_instance(
+                    || "threshold from instance",
+                    config.instance,
+                    1,
+                    config.eligibility_advice[1],
+                    0,
+                )?;
+
+                // Assign diff = balance - threshold (gate forces correctness)
+                let diff_val = self.balance.map(|b| b - threshold_fp);
+                let diff_cell = region.assign_advice(
+                    || "balance - threshold",
+                    config.eligibility_advice[2],
+                    0,
+                    || diff_val,
+                )?;
+
+                Ok(diff_cell)
+            },
+        )?;
+
+        // Range check: diff ∈ [0, 2^RANGE_BITS) proves balance >= threshold
+        range_chip.check_range(
+            layouter.namespace(|| "balance >= threshold"),
+            diff_cell,
+            RANGE_BITS,
+        )?;
+
+        // Expose public inputs: [balance_commitment, threshold, vote_commitment]
+        // Note: threshold at instance[1] is already constrained via
+        // assign_advice_from_instance in the eligibility region above.
+        layouter.constrain_instance(balance_commitment.cell(), config.instance, 0)?;
+        layouter.constrain_instance(vote_commitment.cell(), config.instance, 2)?;
 
         Ok(())
     }
@@ -407,7 +262,7 @@ mod tests {
 
     #[test]
     fn test_private_vote_valid_yes() {
-        let k = 10;
+        let k = 11;
         let balance = 100u64;
         let threshold = 50u64;
         let vote = 1u64;
@@ -430,7 +285,7 @@ mod tests {
 
     #[test]
     fn test_private_vote_valid_no() {
-        let k = 10;
+        let k = 11;
         let balance = 100u64;
         let threshold = 50u64;
         let vote = 0u64;
@@ -469,7 +324,7 @@ mod tests {
 
     #[test]
     fn test_private_vote_exact_threshold() {
-        let k = 10;
+        let k = 11;
         let balance = 50u64;
         let threshold = 50u64;
         let vote = 1u64;
@@ -491,11 +346,14 @@ mod tests {
     }
 
     #[test]
-    fn test_commitment_computation() {
+    fn test_commitment_is_poseidon() {
         let value = Fp::from(100);
         let randomness = Fp::from(42);
         let commitment = PrivateVoteCircuit::compute_commitment(value, randomness);
-        assert_eq!(commitment, Fp::from(142));
+        // Poseidon hash is deterministic but NOT a simple addition
+        assert_ne!(commitment, value + randomness);
+        // Verify it matches the Poseidon chip's output
+        assert_eq!(commitment, PoseidonCommitmentChip::hash_outside_circuit(value, randomness));
     }
 
     #[test]
@@ -503,7 +361,6 @@ mod tests {
         let circuit = PrivateVoteCircuit::default();
         let _without_witnesses = circuit.without_witnesses();
         assert_eq!(circuit.threshold, 0);
-        assert_eq!(circuit.bits.len(), RANGE_BITS);
     }
 
     #[test]
@@ -513,7 +370,7 @@ mod tests {
 
     #[test]
     fn test_zero_threshold() {
-        let k = 10;
+        let k = 11;
         let balance = 100u64;
         let threshold = 0u64;
         let vote = 1u64;
@@ -536,7 +393,7 @@ mod tests {
 
     #[test]
     fn test_zero_balance_zero_threshold() {
-        let k = 10;
+        let k = 11;
         let balance = 0u64;
         let threshold = 0u64;
         let vote = 0u64;
@@ -555,5 +412,91 @@ mod tests {
 
         let prover = MockProver::run(k, &circuit, vec![public_inputs]).unwrap();
         assert_eq!(prover.verify(), Ok(()));
+    }
+
+    #[test]
+    fn test_wrong_commitment_rejected() {
+        let k = 11;
+        let balance = 100u64;
+        let threshold = 50u64;
+        let vote = 1u64;
+        let randomness_balance = Fp::from(42);
+        let randomness_vote = Fp::from(84);
+
+        let circuit =
+            PrivateVoteCircuit::new(balance, randomness_balance, vote, randomness_vote, threshold);
+
+        // Use a wrong balance commitment (different randomness)
+        let wrong_commitment =
+            PrivateVoteCircuit::compute_commitment(Fp::from(balance), Fp::from(999));
+        let vote_commitment =
+            PrivateVoteCircuit::compute_commitment(Fp::from(vote), randomness_vote);
+
+        let public_inputs = vec![wrong_commitment, Fp::from(threshold), vote_commitment];
+
+        let prover = MockProver::run(k, &circuit, vec![public_inputs]).unwrap();
+        assert!(prover.verify().is_err());
+    }
+
+    #[test]
+    fn test_circuit_rejects_forged_eligibility() {
+        let k = 11;
+        let balance = 10u64; // Below threshold
+        let threshold = 100u64;
+        let vote = 1u64;
+        let randomness_balance = Fp::from(42);
+        let randomness_vote = Fp::from(84);
+
+        let balance_commitment =
+            PrivateVoteCircuit::compute_commitment(Fp::from(balance), randomness_balance);
+        let vote_commitment =
+            PrivateVoteCircuit::compute_commitment(Fp::from(vote), randomness_vote);
+
+        // Build circuit directly, bypassing constructor assertions
+        let circuit = PrivateVoteCircuit {
+            balance: Value::known(Fp::from(balance)),
+            randomness_balance: Value::known(randomness_balance),
+            vote: Value::known(Fp::from(vote)),
+            randomness_vote: Value::known(randomness_vote),
+            threshold,
+        };
+
+        let public_inputs = vec![balance_commitment, Fp::from(threshold), vote_commitment];
+        let prover = MockProver::run(k, &circuit, vec![public_inputs]).unwrap();
+        assert!(
+            prover.verify().is_err(),
+            "Circuit must reject when balance < threshold (eligibility gate)"
+        );
+    }
+
+    #[test]
+    fn test_circuit_rejects_non_boolean_vote() {
+        let k = 11;
+        let balance = 1000u64;
+        let threshold = 100u64;
+        let vote = 2u64; // NOT boolean (neither 0 nor 1)
+        let randomness_balance = Fp::from(42);
+        let randomness_vote = Fp::from(84);
+
+        let balance_commitment =
+            PrivateVoteCircuit::compute_commitment(Fp::from(balance), randomness_balance);
+        let vote_commitment =
+            PrivateVoteCircuit::compute_commitment(Fp::from(vote), randomness_vote);
+
+        // Build circuit directly, bypassing constructor assertions
+        let circuit = PrivateVoteCircuit {
+            balance: Value::known(Fp::from(balance)),
+            randomness_balance: Value::known(randomness_balance),
+            vote: Value::known(Fp::from(vote)),
+            randomness_vote: Value::known(randomness_vote),
+            threshold,
+        };
+
+        let public_inputs = vec![balance_commitment, Fp::from(threshold), vote_commitment];
+        let prover = MockProver::run(k, &circuit, vec![public_inputs]).unwrap();
+        assert!(
+            prover.verify().is_err(),
+            "Circuit must reject non-boolean vote (vote=2 does not fit in 1 bit)"
+        );
     }
 }

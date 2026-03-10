@@ -21,10 +21,13 @@
 //! let circuit = CircuitBuilder::new(ir).build::<Fp>();
 //! ```
 
-use crate::{CircuitIR, CompilerError, ZkType};
+use crate::ast::ComparisonOp;
+use crate::gadgets::{ComparisonChip, ComparisonConfig, RangeProofChip, RangeProofConfig};
+use crate::{CircuitIR, CompilerError, Constraint, ZkType};
 use halo2_proofs::{
     arithmetic::Field as Halo2Field,
     circuit::{Layouter, SimpleFloorPlanner, Value},
+    pasta::Fp,
     plonk::{Advice, Circuit, Column, ConstraintSystem, Error as Halo2Error, Instance},
 };
 
@@ -74,6 +77,8 @@ impl CircuitBuilder {
 pub struct ZkCircuitConfig {
     advice: Vec<Column<Advice>>,
     instance: Column<Instance>,
+    range_config: RangeProofConfig,
+    comparison_config: ComparisonConfig,
 }
 
 #[derive(Clone, Debug)]
@@ -160,23 +165,25 @@ impl<F: Halo2Field> ZkCircuit<F> {
     }
 }
 
-impl<F: Halo2Field> Circuit<F> for ZkCircuit<F> {
+impl Circuit<Fp> for ZkCircuit<Fp> {
     type Config = ZkCircuitConfig;
     type FloorPlanner = SimpleFloorPlanner;
 
     fn without_witnesses(&self) -> Self {
-        // Returns a copy with zero witness values for circuit structure testing
         Self {
             ir: self.ir.clone(),
-            witness_values: vec![Value::known(F::ZERO); self.ir.private_witnesses.len()],
-            public_values: vec![Value::known(F::ZERO); self.ir.public_inputs.len()],
+            witness_values: vec![Value::unknown(); self.ir.private_witnesses.len()],
+            public_values: vec![Value::unknown(); self.ir.public_inputs.len()],
         }
     }
 
-    fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-        const MAX_ADVICE_COLUMNS: usize = 10;
+    fn configure(meta: &mut ConstraintSystem<Fp>) -> Self::Config {
+        // Configure gadgets — each allocates its own columns and gates
+        let range_config = RangeProofChip::configure(meta);
+        let comparison_config = ComparisonChip::configure(meta);
 
-        let advice: Vec<Column<Advice>> = (0..MAX_ADVICE_COLUMNS)
+        // General-purpose advice columns for unconstrained witnesses
+        let advice: Vec<Column<Advice>> = (0..2)
             .map(|_| {
                 let col = meta.advice_column();
                 meta.enable_equality(col);
@@ -187,29 +194,146 @@ impl<F: Halo2Field> Circuit<F> for ZkCircuit<F> {
         let instance = meta.instance_column();
         meta.enable_equality(instance);
 
-        ZkCircuitConfig { advice, instance }
+        ZkCircuitConfig { advice, instance, range_config, comparison_config }
     }
 
     fn synthesize(
         &self,
         config: Self::Config,
-        mut layouter: impl Layouter<F>,
+        mut layouter: impl Layouter<Fp>,
     ) -> Result<(), Halo2Error> {
-        // Assign private witness values to advice columns
-        if !self.witness_values.is_empty() {
-            let witness_values = self.witness_values.clone();
-            layouter.assign_region(
-                || "witness_region",
-                |mut region| {
-                    for (idx, &value) in witness_values.iter().enumerate() {
-                        let column_idx = idx % config.advice.len();
-                        let row = idx / config.advice.len();
+        let range_chip = RangeProofChip::construct(config.range_config.clone());
+        let comparison_chip = ComparisonChip::construct(config.comparison_config.clone());
 
+        let mut unconstrained: Vec<(usize, Value<Fp>)> = Vec::new();
+
+        for (idx, (field, &wv)) in
+            self.ir.private_witnesses.iter().zip(self.witness_values.iter()).enumerate()
+        {
+            let mut field_constrained = false;
+
+            for constraint in &field.constraints {
+                match constraint {
+                    Constraint::Range { num_bits } => {
+                        let cell = range_chip
+                            .load_value(layouter.namespace(|| format!("load_w{}", idx)), wv)?;
+                        range_chip.check_range(
+                            layouter.namespace(|| format!("range_{}", idx)),
+                            cell,
+                            *num_bits,
+                        )?;
+                        field_constrained = true;
+                    }
+                    Constraint::Boolean => {
+                        let cell = range_chip
+                            .load_value(layouter.namespace(|| format!("load_bool_{}", idx)), wv)?;
+                        range_chip.check_range(
+                            layouter.namespace(|| format!("bool_{}", idx)),
+                            cell,
+                            1,
+                        )?;
+                        field_constrained = true;
+                    }
+                    Constraint::RangeProof { min, max } => {
+                        // The generic circuit builder only supports bounded range
+                        // checks where min and max fit in u64. For u128 values,
+                        // the proc-macro handles them via DualRange decomposition.
+                        if *min > u64::MAX as u128 || *max > u64::MAX as u128 {
+                            return Err(Halo2Error::Synthesis);
+                        }
+                        let min_fp = Fp::from(*min as u64);
+                        let max_fp = Fp::from(*max as u64);
+                        let cell = range_chip
+                            .load_value(layouter.namespace(|| format!("load_rp_{}", idx)), wv)?;
+                        range_chip.check_range_bounded(
+                            layouter.namespace(|| format!("rangeproof_{}", idx)),
+                            cell,
+                            min_fp,
+                            max_fp,
+                            64,
+                        )?;
+                        field_constrained = true;
+                    }
+                    Constraint::Comparison { operator, value } => {
+                        let witness_cell = comparison_chip
+                            .load_value(layouter.namespace(|| format!("load_cmp_{}", idx)), wv)?;
+                        let threshold = Value::known(Fp::from(*value));
+                        let threshold_cell = comparison_chip.load_value(
+                            layouter.namespace(|| format!("load_cmp_thr_{}", idx)),
+                            threshold,
+                        )?;
+                        match operator {
+                            ComparisonOp::GreaterThan => {
+                                comparison_chip.assert_gt(
+                                    layouter.namespace(|| format!("cmp_gt_{}", idx)),
+                                    witness_cell,
+                                    threshold_cell,
+                                    64,
+                                )?;
+                            }
+                            ComparisonOp::GreaterThanOrEqual => {
+                                comparison_chip.assert_gte(
+                                    layouter.namespace(|| format!("cmp_gte_{}", idx)),
+                                    witness_cell,
+                                    threshold_cell,
+                                    64,
+                                )?;
+                            }
+                            ComparisonOp::LessThan => {
+                                comparison_chip.assert_lt(
+                                    layouter.namespace(|| format!("cmp_lt_{}", idx)),
+                                    witness_cell,
+                                    threshold_cell,
+                                    64,
+                                )?;
+                            }
+                            ComparisonOp::LessThanOrEqual => {
+                                comparison_chip.assert_lte(
+                                    layouter.namespace(|| format!("cmp_lte_{}", idx)),
+                                    witness_cell,
+                                    threshold_cell,
+                                    64,
+                                )?;
+                            }
+                            ComparisonOp::Equal | ComparisonOp::NotEqual => {
+                                // Equal/NotEqual comparisons are not supported in the generic
+                                // circuit builder. Return a synthesis error rather than silently
+                                // marking the field as constrained without any actual constraint.
+                                return Err(Halo2Error::Synthesis);
+                            }
+                        }
+                        field_constrained = true;
+                    }
+                    Constraint::Commitment { .. }
+                    | Constraint::ArithmeticRelation { .. }
+                    | Constraint::MerkleProof { .. } => {
+                        // These are cross-field constraints that require hand-written circuits
+                        // (tx_privacy, private_vote, state_mask) using gadgets directly.
+                        // The generic builder cannot generate these constraints, so the field
+                        // is left unconstrained (assigned to general advice columns with a
+                        // warning). Do NOT mark field_constrained = true here.
+                    }
+                }
+            }
+
+            if !field_constrained {
+                unconstrained.push((idx, wv));
+            }
+        }
+
+        // Assign unconstrained witnesses to general advice columns
+        if !unconstrained.is_empty() {
+            layouter.assign_region(
+                || "unconstrained_witnesses",
+                |mut region| {
+                    for (i, (idx, value)) in unconstrained.iter().enumerate() {
+                        let col = i % config.advice.len();
+                        let row = i / config.advice.len();
                         region.assign_advice(
                             || format!("witness_{}", idx),
-                            config.advice[column_idx],
+                            config.advice[col],
                             row,
-                            || value,
+                            || *value,
                         )?;
                     }
                     Ok(())
@@ -217,13 +341,17 @@ impl<F: Halo2Field> Circuit<F> for ZkCircuit<F> {
             )?;
         }
 
-        // Assign public input values from instance column to advice columns
+        // Assign public inputs from the instance column into advice cells.
+        // NOTE: In the generic builder, these public inputs are accessible but
+        // not linked to any private witness via constraints. The generic builder
+        // cannot infer cross-field relationships (e.g. commitment == Poseidon(witness)).
+        // Hand-written circuits (tx_privacy, state_mask, private_vote) handle this
+        // explicitly using constrain_instance() after computing derived values.
         if !self.public_values.is_empty() {
-            let public_values = self.public_values.clone();
             layouter.assign_region(
-                || "public_input_region",
+                || "public_inputs",
                 |mut region| {
-                    for (idx, _value) in public_values.iter().enumerate() {
+                    for (idx, _) in self.public_values.iter().enumerate() {
                         region.assign_advice_from_instance(
                             || format!("public_{}", idx),
                             config.instance,
@@ -262,11 +390,7 @@ pub fn validate_circuit_ir(ir: &CircuitIR) -> Result<(), CompilerError> {
 }
 
 fn estimate_required_rows(ir: &CircuitIR) -> usize {
-    let witness_rows = ir.private_witnesses.len();
-    let public_rows = ir.public_inputs.len();
-    let constraint_rows: usize = ir.private_witnesses.iter().map(|w| w.constraints.len()).sum();
-
-    (witness_rows + public_rows + constraint_rows) * 2
+    ir.estimate_rows()
 }
 
 fn validate_zk_type(zk_type: &ZkType) -> Result<(), CompilerError> {

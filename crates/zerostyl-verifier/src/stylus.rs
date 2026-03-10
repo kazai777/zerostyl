@@ -2,15 +2,9 @@
 //!
 //! This module provides the Stylus contract interface for on-chain proof verification.
 //!
-//! # Usage
-//!
-//! The verifier requires a VerifyingKey (VK) and commitment parameters to verify proofs.
-//! Currently, VK must be embedded at compile time using the `embedded_vk` feature.
-//!
-//! # Future Work
-//!
-//! - VK storage in contract state (M2)
-//! - VK passed as calldata with serialization (M3)
+//! When deployed with the `embedded_vk` feature, the contract can verify proofs
+//! against the embedded reference circuit. The VK is regenerated at runtime from
+//! embedded IPA parameters because halo2_proofs 0.3.2 lacks VK serialization.
 
 use stylus_sdk::{abi::Bytes, prelude::*};
 
@@ -31,25 +25,43 @@ impl ZeroStylVerifier {
     ///
     /// # Arguments
     /// * `proof` - The serialized proof bytes
-    /// * `public_inputs` - The serialized public inputs
+    /// * `public_inputs` - The serialized public inputs (postcard format)
     ///
     /// # Returns
     /// * `Ok(true)` - Proof is valid
     /// * `Ok(false)` - Proof is invalid
     /// * `Err` - VK not configured or malformed inputs
-    ///
-    /// # Note
-    /// Currently returns Err because VK is not embedded.
-    /// Use `verify_with_vk_and_params` from the library directly when
-    /// VK and params are available.
-    pub fn verify(&self, proof: Bytes, _public_inputs: Bytes) -> Result<bool, Vec<u8>> {
+    pub fn verify(&self, proof: Bytes, public_inputs: Bytes) -> Result<bool, Vec<u8>> {
         if proof.0.is_empty() {
             return Err(Vec::from(b"Empty proof"));
         }
 
-        Err(Vec::from(
-            b"VK not configured. Deploy with embedded_vk feature or use library directly.",
-        ))
+        #[cfg(feature = "embedded_vk")]
+        {
+            let vk = crate::embedded::load_embedded_vk()?;
+            let params = crate::embedded::load_embedded_params()?;
+
+            #[cfg(feature = "std")]
+            {
+                let inputs = crate::verifier::deserialize_public_inputs(&public_inputs.0)?;
+                crate::verifier_nostd::verify_with_vk_and_params(&proof.0, &inputs, &vk, &params)
+            }
+
+            #[cfg(not(feature = "std"))]
+            {
+                // In no_std mode, use verifier_nostd directly with raw deserialization
+                let inputs: Vec<Vec<halo2curves::pasta::Fp>> =
+                    postcard::from_bytes(&public_inputs.0)
+                        .map_err(|_| Vec::from(b"Failed to deserialize public inputs"))?;
+                crate::verifier_nostd::verify_with_vk_and_params(&proof.0, &inputs, &vk, &params)
+            }
+        }
+
+        #[cfg(not(feature = "embedded_vk"))]
+        {
+            let _ = public_inputs;
+            Err(Vec::from(b"VK not configured. Deploy with embedded_vk feature."))
+        }
     }
 
     /// Get circuit metadata
