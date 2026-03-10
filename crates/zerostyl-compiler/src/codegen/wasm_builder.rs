@@ -4,6 +4,7 @@ use crate::{CompilerError, Result};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// Wraps `cargo build --target wasm32-unknown-unknown` for compiling a verifier crate to WASM.
 pub struct WasmBuilder {
     verifier_crate_path: PathBuf,
     target: String,
@@ -11,6 +12,7 @@ pub struct WasmBuilder {
 }
 
 impl WasmBuilder {
+    /// Create a new WASM builder targeting `wasm32-unknown-unknown` with optimization enabled.
     pub fn new<P: AsRef<Path>>(verifier_crate_path: P) -> Self {
         Self {
             verifier_crate_path: verifier_crate_path.as_ref().to_path_buf(),
@@ -19,16 +21,19 @@ impl WasmBuilder {
         }
     }
 
+    /// Override the compilation target (default: `wasm32-unknown-unknown`).
     pub fn with_target(mut self, target: String) -> Self {
         self.target = target;
         self
     }
 
+    /// Enable or disable post-build WASM optimization via `wasm-opt`.
     pub fn with_optimization(mut self, optimize: bool) -> Self {
         self.optimize = optimize;
         self
     }
 
+    /// Build the crate to WASM and return the output bytes.
     pub fn build(&self) -> Result<Vec<u8>> {
         let manifest_path = self.verifier_crate_path.join("Cargo.toml");
         if !manifest_path.exists() {
@@ -128,6 +133,7 @@ impl WasmBuilder {
         Ok(optimized)
     }
 
+    /// Build to WASM and return output with size metadata.
     pub fn build_with_metadata(&self) -> Result<WasmBuildOutput> {
         let wasm_bytes = self.build()?;
         Ok(WasmBuildOutput {
@@ -138,10 +144,14 @@ impl WasmBuilder {
     }
 }
 
+/// Result of a WASM build, including the output bytes and build metadata.
 #[derive(Debug, Clone)]
 pub struct WasmBuildOutput {
+    /// Raw WASM bytes.
     pub wasm_bytes: Vec<u8>,
+    /// Total size in bytes.
     pub size_bytes: usize,
+    /// Whether `wasm-opt` optimization was applied.
     pub optimized: bool,
 }
 

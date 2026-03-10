@@ -15,12 +15,16 @@ use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
+/// Serializable proof data containing the raw proof bytes and public inputs as hex strings.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ProofData {
+    /// Raw halo2 proof bytes.
     pub proof_bytes: Vec<u8>,
+    /// Public inputs as hex-encoded field element strings.
     pub public_inputs: Vec<Vec<String>>,
 }
 
+/// Native (off-chain) halo2 prover with key caching.
 pub struct NativeProver<C: Circuit<Fp>> {
     circuit: C,
     k: u32,
@@ -31,6 +35,7 @@ pub struct NativeProver<C: Circuit<Fp>> {
 }
 
 impl<C: Circuit<Fp> + Clone> NativeProver<C> {
+    /// Create a new prover with default cache directory (`.zerostyl_cache`).
     pub fn new(circuit: C, _circuit_name: String, k: u32) -> Result<Self> {
         let cache_dir = std::env::current_dir()?.join(".zerostyl_cache");
         let key_manager = KeyManager::new(&cache_dir)?;
@@ -38,12 +43,14 @@ impl<C: Circuit<Fp> + Clone> NativeProver<C> {
         Ok(Self { circuit, k, key_manager, proving_key: None, verifying_key: None, params: None })
     }
 
+    /// Create a new prover with a custom cache directory.
     pub fn with_cache_dir<P: AsRef<Path>>(circuit: C, k: u32, cache_dir: P) -> Result<Self> {
         let key_manager = KeyManager::new(cache_dir)?;
 
         Ok(Self { circuit, k, key_manager, proving_key: None, verifying_key: None, params: None })
     }
 
+    /// Generate IPA params, proving key, and verifying key. Must be called before proving.
     pub fn setup(&mut self, metadata: KeyMetadata) -> Result<()> {
         let params = self.key_manager.generate_params(self.k)?;
 
@@ -56,6 +63,7 @@ impl<C: Circuit<Fp> + Clone> NativeProver<C> {
         Ok(())
     }
 
+    /// Generate a halo2 proof for the circuit with the given public inputs.
     pub fn generate_proof(&self, public_inputs: &[Vec<Fp>]) -> Result<Vec<u8>> {
         let pk = self
             .proving_key
@@ -85,6 +93,7 @@ impl<C: Circuit<Fp> + Clone> NativeProver<C> {
         Ok(transcript.finalize())
     }
 
+    /// Verify a proof against the given public inputs. Returns `true` if valid.
     pub fn verify_proof(&self, proof: &[u8], public_inputs: &[Vec<Fp>]) -> Result<bool> {
         use halo2_proofs::plonk::SingleVerifier;
 
@@ -107,19 +116,23 @@ impl<C: Circuit<Fp> + Clone> NativeProver<C> {
             .or_else(|_| Ok(false))
     }
 
+    /// Returns the proving key if `setup()` has been called.
     pub fn proving_key(&self) -> Option<&ProvingKey<EqAffine>> {
         self.proving_key.as_ref()
     }
 
+    /// Returns the verifying key if `setup()` has been called.
     pub fn verifying_key(&self) -> Option<&VerifyingKey<EqAffine>> {
         self.verifying_key.as_ref()
     }
 }
 
+/// Format a field element as a Debug string.
 pub fn field_to_string(f: &Fp) -> String {
     format!("{:?}", f)
 }
 
+/// Parse a field element from a decimal or hex (`0x`-prefixed) string.
 pub fn string_to_field(s: &str) -> Result<Fp> {
     use halo2curves::group::ff::PrimeField;
 

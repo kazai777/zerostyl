@@ -164,12 +164,10 @@ fn test_default_constraints() {
     let ir = transform_to_ir(parsed).unwrap();
 
     assert_eq!(ir.private_witnesses[0].constraints.len(), 1);
-    if let Constraint::RangeProof { min, max } = ir.private_witnesses[0].constraints[0] {
-        assert_eq!(min, 0);
-        assert_eq!(max, u64::MAX as u128);
-    } else {
-        panic!("Expected RangeProof for u64");
-    }
+    assert!(
+        matches!(ir.private_witnesses[0].constraints[0], Constraint::Range { num_bits: 64 }),
+        "Expected Range {{ num_bits: 64 }} for u64"
+    );
 
     assert_eq!(ir.private_witnesses[1].constraints.len(), 1);
     if let Constraint::RangeProof { min, max } = ir.private_witnesses[1].constraints[0] {
@@ -320,9 +318,10 @@ fn test_circuit_config_structure() {
     let parsed = parse_contract(input).unwrap();
     let ir = transform_to_ir(parsed).unwrap();
 
-    assert_eq!(ir.circuit_config.k(), 16);
-    assert_eq!(ir.circuit_config.lookup_tables().len(), 0);
-    assert_eq!(ir.circuit_config.custom_gates().len(), 0);
+    // k is computed dynamically: 1 u64 → (1 + 66) * 2 = 134 → k=8
+    assert_eq!(ir.circuit_config.k(), 8);
+    assert_eq!(ir.circuit_config.num_advice_columns(), 1);
+    assert_eq!(ir.circuit_config.num_instance_columns(), 1);
 }
 
 #[test]
