@@ -11,7 +11,7 @@ use rand::rngs::OsRng;
 
 #[test]
 fn test_private_vote_real_proof() {
-    let k = 10;
+    let k = 11;
 
     let balance = 100u64;
     let threshold = 50u64;

@@ -10,6 +10,7 @@ publish = false
 zerostyl-compiler = { path = "../../crates/zerostyl-compiler" }
 zerostyl-runtime = { path = "../../crates/zerostyl-runtime" }
 halo2_proofs = { version = "0.3", features = ["dev-graph"] }
+halo2_gadgets = "0.3"
 halo2curves = "0.7"
 ff = "0.13"
 group = "0.13"
