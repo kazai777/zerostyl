@@ -43,7 +43,6 @@ getrandom = { version = "0.2", default-features = false, features = ["custom"] }
 [build-dependencies]
 halo2_proofs = "0.3"
 halo2curves = { version = "0.7", features = ["bits", "derive_serde"] }
-regex = "1.10"
 
 [dev-dependencies]
 tempfile = "3.0"
@@ -66,12 +65,5 @@ stylus = [
 ]
 embedded_vk = []  # Enable VK embedding at build time
 
-[profile.release]
-opt-level = "z"         # Optimize for size
-lto = true              # Link-time optimization
-codegen-units = 1       # Better optimization
-panic = "abort"         # Smaller binary size
-strip = true            # Strip symbols
-
-[profile.dev]
-panic = "abort"
+# NOTE: [profile.release] and [profile.dev] are defined in the workspace root Cargo.toml
+# to avoid the "profiles for the non root package will be ignored" warning.

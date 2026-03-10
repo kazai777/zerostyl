@@ -17,9 +17,13 @@ pub struct VkComponents {
     pub extended_k: u32,
     /// Domain generator omega (32 bytes)
     pub omega: Vec<u8>,
+    /// Number of fixed columns.
     pub num_fixed_columns: usize,
+    /// Number of advice columns.
     pub num_advice_columns: usize,
+    /// Number of instance columns.
     pub num_instance_columns: usize,
+    /// Number of selector columns.
     pub num_selectors: usize,
     /// Fixed commitments (32 bytes each, compressed)
     pub fixed_commitments: Vec<Vec<u8>>,
@@ -30,22 +34,27 @@ pub struct VkComponents {
 }
 
 impl VkComponents {
+    /// Serialize to bytes using postcard.
     pub fn to_bytes(&self) -> Result<Vec<u8>, postcard::Error> {
         postcard::to_allocvec(self)
     }
 
+    /// Deserialize from postcard bytes.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, postcard::Error> {
         postcard::from_bytes(bytes)
     }
 
+    /// Returns 2^k, the number of rows in the domain.
     pub fn domain_size(&self) -> usize {
         1 << self.k
     }
 
+    /// Returns 2^extended_k, the extended domain size.
     pub fn extended_domain_size(&self) -> usize {
         1 << self.extended_k
     }
 
+    /// Deserialize the domain generator omega from its byte representation.
     pub fn get_omega(&self) -> Result<Fp, &'static str> {
         if self.omega.len() != 32 {
             return Err("Invalid omega length");
@@ -55,6 +64,7 @@ impl VkComponents {
         Option::from(Fp::from_repr(bytes)).ok_or("Failed to deserialize omega")
     }
 
+    /// Deserialize a fixed commitment at the given index.
     pub fn get_fixed_commitment(&self, index: usize) -> Result<EqAffine, &'static str> {
         if index >= self.fixed_commitments.len() {
             return Err("Fixed commitment index out of bounds");
@@ -62,6 +72,7 @@ impl VkComponents {
         deserialize_affine_point(&self.fixed_commitments[index])
     }
 
+    /// Deserialize a permutation commitment at the given index.
     pub fn get_permutation_commitment(&self, index: usize) -> Result<EqAffine, &'static str> {
         if index >= self.permutation_commitments.len() {
             return Err("Permutation commitment index out of bounds");
@@ -69,15 +80,18 @@ impl VkComponents {
         deserialize_affine_point(&self.permutation_commitments[index])
     }
 
+    /// Deserialize all fixed commitments.
     pub fn get_all_fixed_commitments(&self) -> Result<Vec<EqAffine>, &'static str> {
         self.fixed_commitments.iter().map(|b| deserialize_affine_point(b)).collect()
     }
 
+    /// Deserialize all permutation commitments.
     pub fn get_all_permutation_commitments(&self) -> Result<Vec<EqAffine>, &'static str> {
         self.permutation_commitments.iter().map(|b| deserialize_affine_point(b)).collect()
     }
 }
 
+/// Serialize an affine curve point to its compressed byte representation.
 pub fn serialize_affine_point(point: &EqAffine) -> Vec<u8> {
     point.to_bytes().as_ref().to_vec()
 }
