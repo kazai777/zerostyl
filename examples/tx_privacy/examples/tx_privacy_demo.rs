@@ -120,7 +120,69 @@ fn main() {
         println!("  - The transfer amount");
         println!("  - Any private financial data");
         println!();
-        println!("This proof ({} bytes) can be submitted on-chain for verification.", proof.len());
+
+        // ── Format public inputs as bytes32 for on-chain submission ─────
+        let commitment_old_bytes = commitment_old.to_repr();
+        let commitment_new_bytes = commitment_new.to_repr();
+        let merkle_root_bytes = merkle_root.to_repr();
+
+        // Fp::to_repr() is little-endian; reverse for big-endian (Solidity bytes32)
+        let to_bytes32 = |repr: &[u8]| -> String {
+            let mut padded = [0u8; 32];
+            for (i, byte) in repr.iter().enumerate() {
+                if i < 32 {
+                    padded[31 - i] = *byte;
+                }
+            }
+            format!("0x{}", hex::encode(padded))
+        };
+
+        let commit_old_hex = to_bytes32(commitment_old_bytes.as_ref());
+        let commit_new_hex = to_bytes32(commitment_new_bytes.as_ref());
+        let root_hex = to_bytes32(merkle_root_bytes.as_ref());
+        let proof_hex = format!("0x{}", hex::encode(&proof));
+
+        println!("=== ON-CHAIN SUBMISSION ===\n");
+        println!("The proof and public inputs below can be submitted to the");
+        println!("TxPrivacyVerifier Stylus contract on Arbitrum Sepolia.\n");
+        println!("Public inputs (visible on-chain):");
+        println!("  commitment_old : {}", commit_old_hex);
+        println!("  commitment_new : {}", commit_new_hex);
+        println!("  merkle_root    : {}", root_hex);
+        println!("  proof size     : {} bytes", proof.len());
+        println!();
+        println!("Private data (NEVER sent on-chain):");
+        println!("  balance_old    : {} tokens", balance_old);
+        println!("  balance_new    : {} tokens", balance_new);
+        println!("  amount         : {} tokens", amount);
+        println!();
+
+        println!("=== CAST COMMANDS ===\n");
+        println!("# Pre-requisite: set these env vars BEFORE running (off-camera):");
+        println!("# export CONTRACT=<deployed_address>");
+        println!("# export RPC=https://sepolia-rollup.arbitrum.io/rpc");
+        println!("# export PK=<your_private_key>\n");
+
+        println!("# 1. Register the merkle root (owner only, one-time):");
+        println!("cast send $CONTRACT \"registerMerkleRoot(bytes32)\" {} \\", root_hex);
+        println!("  --private-key $PK --rpc-url $RPC\n");
+
+        println!("# 2. Deposit the initial commitment (one-time):");
+        println!("cast send $CONTRACT \"depositCommitment(bytes32)\" {} \\", commit_old_hex);
+        println!("  --private-key $PK --rpc-url $RPC\n");
+
+        println!("# 3. Submit the verified private transfer:");
+        println!("cast send $CONTRACT \\");
+        println!("  \"verifyTransfer(bytes,bytes32,bytes32,bytes32)\" \\");
+        println!("  {} \\", proof_hex);
+        println!("  {} \\", commit_old_hex);
+        println!("  {} \\", commit_new_hex);
+        println!("  {} \\", root_hex);
+        println!("  --private-key $PK --rpc-url $RPC\n");
+
+        println!("# 4. Verify on-chain state:");
+        println!("cast call $CONTRACT \"isSpent(bytes32)\" {} --rpc-url $RPC", commit_old_hex);
+        println!("cast call $CONTRACT \"getVerifiedCount()\" --rpc-url $RPC");
     } else {
         println!("ERROR: Proof verification failed!");
         std::process::exit(1);

@@ -115,6 +115,7 @@ impl StateMaskChip {
         mut layouter: impl Layouter<Fp>,
         value: Value<Fp>,
         randomness: Value<Fp>,
+        commitment: Value<Fp>,
     ) -> Result<AssignedCell<Fp, Fp>, Error> {
         layouter.assign_region(
             || "commitment",
@@ -123,9 +124,6 @@ impl StateMaskChip {
 
                 region.assign_advice(|| "value", self.config.advice[0], 0, || value)?;
                 region.assign_advice(|| "randomness", self.config.advice[1], 0, || randomness)?;
-
-                let commitment = value.zip(randomness).map(|(v, r)| v + r);
-
                 region.assign_advice(|| "commitment", self.config.advice[2], 0, || commitment)
             },
         )
@@ -207,6 +205,11 @@ pub struct StateMaskCircuit {
     pub range_min: u64,
     pub range_max: u64,
     pub bits: Vec<Value<Fp>>,
+    /// Debug only: override the commitment cell assignment.
+    /// When set, the commitment gate will check `value + randomness - override`,
+    /// which fails if the override does not equal `value + randomness`.
+    /// The same value must be used as the public input in `debug_circuit`.
+    pub commitment_override: Option<Value<Fp>>,
 }
 
 impl Default for StateMaskCircuit {
@@ -217,6 +220,7 @@ impl Default for StateMaskCircuit {
             range_min: 0,
             range_max: 255,
             bits: vec![Value::unknown(); RANGE_BITS],
+            commitment_override: None,
         }
     }
 }
@@ -245,6 +249,33 @@ impl StateMaskCircuit {
             range_min,
             range_max,
             bits,
+            commitment_override: None,
+        }
+    }
+
+    /// Construct a circuit without validating inputs — for use in the debugger only.
+    ///
+    /// Allows injecting any value (including out-of-range or inconsistent ones)
+    /// so the MockProver can surface the exact constraint that fails.
+    /// `commitment_override`, if set, replaces the computed `value + randomness`
+    /// in the commitment cell assignment and must also be passed as the public input.
+    pub fn from_raw(
+        value: u64,
+        randomness: Fp,
+        range_min: u64,
+        range_max: u64,
+        commitment_override: Option<Fp>,
+    ) -> Self {
+        let normalized = value.wrapping_sub(range_min);
+        let bits = (0..RANGE_BITS).map(|i| Value::known(Fp::from((normalized >> i) & 1))).collect();
+
+        Self {
+            value: Value::known(Fp::from(value)),
+            randomness: Value::known(randomness),
+            range_min,
+            range_max,
+            bits,
+            commitment_override: commitment_override.map(Value::known),
         }
     }
 
@@ -281,10 +312,15 @@ impl Circuit<Fp> for StateMaskCircuit {
     ) -> Result<(), Error> {
         let chip = StateMaskChip::construct(config.clone());
 
+        let commitment = self
+            .commitment_override
+            .unwrap_or_else(|| self.value.zip(self.randomness).map(|(v, r)| v + r));
+
         let commitment_cell = chip.assign_commitment(
             layouter.namespace(|| "commitment"),
             self.value,
             self.randomness,
+            commitment,
         )?;
 
         chip.assign_range_proof(layouter.namespace(|| "range_proof"), self.bits.clone())?;

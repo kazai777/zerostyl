@@ -117,6 +117,7 @@ impl TxPrivacyChip {
         mut layouter: impl Layouter<Fp>,
         balance: Value<Fp>,
         randomness: Value<Fp>,
+        commitment: Value<Fp>,
     ) -> Result<AssignedCell<Fp, Fp>, Error> {
         layouter.assign_region(
             || "commitment",
@@ -125,9 +126,6 @@ impl TxPrivacyChip {
 
                 region.assign_advice(|| "balance", self.config.advice[0], 0, || balance)?;
                 region.assign_advice(|| "randomness", self.config.advice[1], 0, || randomness)?;
-
-                let commitment = balance.zip(randomness).map(|(b, r)| b + r);
-
                 region.assign_advice(|| "commitment", self.config.advice[2], 0, || commitment)
             },
         )
@@ -206,6 +204,10 @@ pub struct TxPrivacyCircuit {
     pub randomness_new: Value<Fp>,
     pub amount: Value<Fp>,
     pub merkle_path: Vec<Value<Fp>>,
+    /// Debug only: override the commitment_old cell assignment.
+    pub commitment_old_override: Option<Value<Fp>>,
+    /// Debug only: override the commitment_new cell assignment.
+    pub commitment_new_override: Option<Value<Fp>>,
 }
 
 impl Default for TxPrivacyCircuit {
@@ -217,6 +219,8 @@ impl Default for TxPrivacyCircuit {
             randomness_new: Value::unknown(),
             amount: Value::unknown(),
             merkle_path: vec![Value::unknown(); MERKLE_DEPTH],
+            commitment_old_override: None,
+            commitment_new_override: None,
         }
     }
 }
@@ -241,6 +245,38 @@ impl TxPrivacyCircuit {
             randomness_new: Value::known(randomness_new),
             amount: Value::known(Fp::from(amount)),
             merkle_path: merkle_path.into_iter().map(Value::known).collect(),
+            commitment_old_override: None,
+            commitment_new_override: None,
+        }
+    }
+
+    /// Construct a circuit without validating inputs — for use in the debugger only.
+    ///
+    /// Allows inconsistent balance/amount values so the MockProver can surface
+    /// the `balance_check` gate failure. Commitment overrides let you test the
+    /// `commitment` gate in isolation.
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_raw(
+        balance_old: u64,
+        balance_new: u64,
+        randomness_old: Fp,
+        randomness_new: Fp,
+        amount: u64,
+        merkle_path: Vec<Fp>,
+        commitment_old_override: Option<Fp>,
+        commitment_new_override: Option<Fp>,
+    ) -> Self {
+        assert_eq!(merkle_path.len(), MERKLE_DEPTH, "Merkle path must have depth 32");
+
+        Self {
+            balance_old: Value::known(Fp::from(balance_old)),
+            balance_new: Value::known(Fp::from(balance_new)),
+            randomness_old: Value::known(randomness_old),
+            randomness_new: Value::known(randomness_new),
+            amount: Value::known(Fp::from(amount)),
+            merkle_path: merkle_path.into_iter().map(Value::known).collect(),
+            commitment_old_override: commitment_old_override.map(Value::known),
+            commitment_new_override: commitment_new_override.map(Value::known),
         }
     }
 
@@ -285,21 +321,27 @@ impl Circuit<Fp> for TxPrivacyCircuit {
     ) -> Result<(), Error> {
         let chip = TxPrivacyChip::construct(config.clone());
 
-        // Compute and constrain commitment_old
+        let commitment_old = self
+            .commitment_old_override
+            .unwrap_or_else(|| self.balance_old.zip(self.randomness_old).map(|(b, r)| b + r));
+        let commitment_new = self
+            .commitment_new_override
+            .unwrap_or_else(|| self.balance_new.zip(self.randomness_new).map(|(b, r)| b + r));
+
         let commitment_old_cell = chip.assign_commitment(
             layouter.namespace(|| "commitment_old"),
             self.balance_old,
             self.randomness_old,
+            commitment_old,
         )?;
 
-        // Compute and constrain commitment_new
         let commitment_new_cell = chip.assign_commitment(
             layouter.namespace(|| "commitment_new"),
             self.balance_new,
             self.randomness_new,
+            commitment_new,
         )?;
 
-        // Constrain balance check: balance_old - amount = balance_new
         chip.assign_balance_check(
             layouter.namespace(|| "balance_check"),
             self.balance_old,
@@ -307,16 +349,12 @@ impl Circuit<Fp> for TxPrivacyCircuit {
             self.amount,
         )?;
 
-        // Compute and constrain Merkle proof
-        let commitment_old_value = self.balance_old.zip(self.randomness_old).map(|(b, r)| b + r);
-
         let merkle_root_cell = chip.assign_merkle_proof(
             layouter.namespace(|| "merkle_proof"),
-            commitment_old_value,
+            commitment_old,
             self.merkle_path.clone(),
         )?;
 
-        // Expose public inputs
         layouter.constrain_instance(commitment_old_cell.cell(), config.instance, 0)?;
         layouter.constrain_instance(commitment_new_cell.cell(), config.instance, 1)?;
         layouter.constrain_instance(merkle_root_cell.cell(), config.instance, 2)?;

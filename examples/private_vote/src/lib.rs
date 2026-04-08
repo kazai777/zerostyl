@@ -151,6 +151,7 @@ impl PrivateVoteChip {
         mut layouter: impl Layouter<Fp>,
         value: Value<Fp>,
         randomness: Value<Fp>,
+        commitment: Value<Fp>,
     ) -> Result<AssignedCell<Fp, Fp>, Error> {
         layouter.assign_region(
             || "commitment",
@@ -159,9 +160,6 @@ impl PrivateVoteChip {
 
                 region.assign_advice(|| "value", self.config.advice[0], 0, || value)?;
                 region.assign_advice(|| "randomness", self.config.advice[1], 0, || randomness)?;
-
-                let commitment = value.zip(randomness).map(|(v, r)| v + r);
-
                 region.assign_advice(|| "commitment", self.config.advice[2], 0, || commitment)
             },
         )
@@ -195,6 +193,7 @@ impl PrivateVoteChip {
         mut layouter: impl Layouter<Fp>,
         vote: Value<Fp>,
         randomness: Value<Fp>,
+        commitment: Value<Fp>,
     ) -> Result<AssignedCell<Fp, Fp>, Error> {
         layouter.assign_region(
             || "vote_commit",
@@ -203,9 +202,6 @@ impl PrivateVoteChip {
 
                 region.assign_advice(|| "vote", self.config.advice[0], 0, || vote)?;
                 region.assign_advice(|| "randomness", self.config.advice[1], 0, || randomness)?;
-
-                let commitment = vote.zip(randomness).map(|(v, r)| v + r);
-
                 region.assign_advice(|| "commitment", self.config.advice[2], 0, || commitment)
             },
         )
@@ -288,6 +284,10 @@ pub struct PrivateVoteCircuit {
     pub randomness_vote: Value<Fp>,
     pub threshold: u64,
     pub bits: Vec<Value<Fp>>,
+    /// Debug only: override the balance commitment cell assignment.
+    pub balance_commitment_override: Option<Value<Fp>>,
+    /// Debug only: override the vote commitment cell assignment.
+    pub vote_commitment_override: Option<Value<Fp>>,
 }
 
 impl Default for PrivateVoteCircuit {
@@ -299,6 +299,8 @@ impl Default for PrivateVoteCircuit {
             randomness_vote: Value::unknown(),
             threshold: 0,
             bits: vec![Value::unknown(); RANGE_BITS],
+            balance_commitment_override: None,
+            vote_commitment_override: None,
         }
     }
 }
@@ -334,6 +336,37 @@ impl PrivateVoteCircuit {
             randomness_vote: Value::known(randomness_vote),
             threshold,
             bits,
+            balance_commitment_override: None,
+            vote_commitment_override: None,
+        }
+    }
+
+    /// Construct a circuit without validating inputs — for use in the debugger only.
+    ///
+    /// Allows non-boolean vote values (e.g. vote=2) so the MockProver surfaces
+    /// the `vote_boolean` gate failure. Commitment overrides let you test the
+    /// `commitment` and `vote_commit` gates in isolation.
+    pub fn from_raw(
+        balance: u64,
+        randomness_balance: Fp,
+        vote: u64,
+        randomness_vote: Fp,
+        threshold: u64,
+        balance_commitment_override: Option<Fp>,
+        vote_commitment_override: Option<Fp>,
+    ) -> Self {
+        let normalized = balance.wrapping_sub(threshold);
+        let bits = (0..RANGE_BITS).map(|i| Value::known(Fp::from((normalized >> i) & 1))).collect();
+
+        Self {
+            balance: Value::known(Fp::from(balance)),
+            randomness_balance: Value::known(randomness_balance),
+            vote: Value::known(Fp::from(vote)),
+            randomness_vote: Value::known(randomness_vote),
+            threshold,
+            bits,
+            balance_commitment_override: balance_commitment_override.map(Value::known),
+            vote_commitment_override: vote_commitment_override.map(Value::known),
         }
     }
 
@@ -370,30 +403,32 @@ impl Circuit<Fp> for PrivateVoteCircuit {
     ) -> Result<(), Error> {
         let chip = PrivateVoteChip::construct(config.clone());
 
-        // 1. Prove balance commitment
+        let balance_commitment = self
+            .balance_commitment_override
+            .unwrap_or_else(|| self.balance.zip(self.randomness_balance).map(|(b, r)| b + r));
+        let vote_commitment = self
+            .vote_commitment_override
+            .unwrap_or_else(|| self.vote.zip(self.randomness_vote).map(|(v, r)| v + r));
+
         let balance_commitment_cell = chip.assign_commitment(
             layouter.namespace(|| "balance_commitment"),
             self.balance,
             self.randomness_balance,
+            balance_commitment,
         )?;
 
-        // 2. Prove vote is boolean
         chip.assign_vote_boolean(layouter.namespace(|| "vote_boolean"), self.vote)?;
 
-        // 3. Prove vote commitment
         let vote_commitment_cell = chip.assign_vote_commitment(
             layouter.namespace(|| "vote_commitment"),
             self.vote,
             self.randomness_vote,
+            vote_commitment,
         )?;
 
-        // 4. Prove balance >= threshold via range proof on (balance - threshold)
         chip.assign_range_proof(layouter.namespace(|| "range_proof"), self.bits.clone())?;
 
-        // Expose public inputs
         layouter.constrain_instance(balance_commitment_cell.cell(), config.instance, 0)?;
-        // threshold is public input at index 1 - we don't constrain it from circuit
-        // since it's a known public value
         layouter.constrain_instance(vote_commitment_cell.cell(), config.instance, 2)?;
 
         Ok(())
