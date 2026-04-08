@@ -303,9 +303,15 @@ fn run_schema(circuit_name: &str) -> Result<()> {
             println!("Circuit: state_mask (Privacy-preserving state proof)");
             println!();
             println!("JSON fields:");
-            println!("  state_value      string  required  Secret value committed via Poseidon (u64)");
+            println!(
+                "  state_value      string  required  Secret value committed via Poseidon (u64)"
+            );
             println!("  nonce            string  required  Commitment randomness (u64 or 0x hex)");
-            println!("  collateral_ratio string  required  Ratio to prove in [{}, {}] (u64)", state_mask::COLLATERAL_MIN, state_mask::COLLATERAL_MAX);
+            println!(
+                "  collateral_ratio string  required  Ratio to prove in [{}, {}] (u64)",
+                state_mask::COLLATERAL_MIN,
+                state_mask::COLLATERAL_MAX
+            );
             println!("  hidden_balance   string  required  Balance to prove > threshold (u64)");
             println!("  threshold        string  required  Minimum balance required (u64, public)");
             println!();
@@ -316,11 +322,17 @@ fn run_schema(circuit_name: &str) -> Result<()> {
             println!();
             println!("Gates:");
             println!("  commitment   — Poseidon(state_value, nonce) == commitment");
-            println!("  range_check  — collateral_ratio in [{}, {}]", state_mask::COLLATERAL_MIN, state_mask::COLLATERAL_MAX);
+            println!(
+                "  range_check  — collateral_ratio in [{}, {}]",
+                state_mask::COLLATERAL_MIN,
+                state_mask::COLLATERAL_MAX
+            );
             println!("  comparison   — hidden_balance > threshold");
             println!();
             println!("Example:");
-            println!(r#"  {{"state_value":"1000","nonce":"42","collateral_ratio":"200","hidden_balance":"500","threshold":"100"}}"#);
+            println!(
+                r#"  {{"state_value":"1000","nonce":"42","collateral_ratio":"200","hidden_balance":"500","threshold":"100"}}"#
+            );
         }
         "tx_privacy" => {
             println!("Circuit: tx_privacy (Private Transfer)");
@@ -328,11 +340,21 @@ fn run_schema(circuit_name: &str) -> Result<()> {
             println!("JSON fields:");
             println!("  balance_old      string    required  Sender balance before transfer (u64)");
             println!("  balance_new      string    required  Sender balance after transfer (u64)");
-            println!("  randomness_old   string    required  Commitment randomness for old balance");
-            println!("  randomness_new   string    required  Commitment randomness for new balance");
+            println!(
+                "  randomness_old   string    required  Commitment randomness for old balance"
+            );
+            println!(
+                "  randomness_new   string    required  Commitment randomness for new balance"
+            );
             println!("  amount           string    required  Transfer amount (u64)");
-            println!("  merkle_siblings  string[]  required  Merkle path sibling hashes ({} values)", MERKLE_DEPTH);
-            println!("  merkle_indices   string[]  required  Merkle path direction bits 0/1 ({} values)", MERKLE_DEPTH);
+            println!(
+                "  merkle_siblings  string[]  required  Merkle path sibling hashes ({} values)",
+                MERKLE_DEPTH
+            );
+            println!(
+                "  merkle_indices   string[]  required  Merkle path direction bits 0/1 ({} values)",
+                MERKLE_DEPTH
+            );
             println!();
             println!("Optional _debug overrides:");
             println!("  _debug.commitment_old  string  Override commitment_old public input");
@@ -344,9 +366,14 @@ fn run_schema(circuit_name: &str) -> Result<()> {
             println!("Gates:");
             println!("  commitment    — Poseidon(balance, randomness) == commitment");
             println!("  balance_check — balance_old - amount == balance_new");
-            println!("  merkle        — Poseidon Merkle path verification (depth {})", MERKLE_DEPTH);
+            println!(
+                "  merkle        — Poseidon Merkle path verification (depth {})",
+                MERKLE_DEPTH
+            );
             println!();
-            println!("Note: inconsistent balance_old/amount/balance_new triggers balance_check failure.");
+            println!(
+                "Note: inconsistent balance_old/amount/balance_new triggers balance_check failure."
+            );
         }
         "private_vote" => {
             println!("Circuit: private_vote (Anonymous Voting)");
@@ -433,8 +460,7 @@ fn run_debug(circuit_name: &str, witnesses_path: &PathBuf, k: u32, format: &str)
                 w.collateral_ratio.parse().context("field 'collateral_ratio': expected u64")?;
             let hidden_balance: u64 =
                 w.hidden_balance.parse().context("field 'hidden_balance': expected u64")?;
-            let threshold: u64 =
-                w.threshold.parse().context("field 'threshold': expected u64")?;
+            let threshold: u64 = w.threshold.parse().context("field 'threshold': expected u64")?;
 
             let commitment_override = w
                 .debug
@@ -489,8 +515,7 @@ fn run_debug(circuit_name: &str, witnesses_path: &PathBuf, k: u32, format: &str)
                 .merkle_indices
                 .iter()
                 .map(|s| {
-                    let v: u64 =
-                        s.parse().context("field 'merkle_indices': expected 0 or 1")?;
+                    let v: u64 = s.parse().context("field 'merkle_indices': expected 0 or 1")?;
                     Ok(v != 0)
                 })
                 .collect();
@@ -534,7 +559,11 @@ fn run_debug(circuit_name: &str, witnesses_path: &PathBuf, k: u32, format: &str)
                 TxPrivacyCircuit::compute_commitment(Fp::from(balance_new), randomness_new)
             });
             let merkle_root = merkle_root_override.unwrap_or_else(|| {
-                TxPrivacyCircuit::compute_merkle_root(commitment_old, &merkle_siblings, &merkle_indices)
+                TxPrivacyCircuit::compute_merkle_root(
+                    commitment_old,
+                    &merkle_siblings,
+                    &merkle_indices,
+                )
             });
             debug_circuit(
                 &circuit,
@@ -637,8 +666,7 @@ fn run_witness(circuit_name: &str, witnesses_path: &PathBuf) -> Result<()> {
                 w.collateral_ratio.parse().context("field 'collateral_ratio': expected u64")?;
             let hidden_balance: u64 =
                 w.hidden_balance.parse().context("field 'hidden_balance': expected u64")?;
-            let threshold: u64 =
-                w.threshold.parse().context("field 'threshold': expected u64")?;
+            let threshold: u64 = w.threshold.parse().context("field 'threshold': expected u64")?;
 
             println!("Circuit: state_mask");
             println!();
@@ -657,15 +685,23 @@ fn run_witness(circuit_name: &str, witnesses_path: &PathBuf) -> Result<()> {
             println!();
 
             println!("Validation:");
-            if collateral_ratio >= state_mask::COLLATERAL_MIN && collateral_ratio <= state_mask::COLLATERAL_MAX {
-                println!("  collateral_ratio in [{}, {}]: PASS", state_mask::COLLATERAL_MIN, state_mask::COLLATERAL_MAX);
+            if (state_mask::COLLATERAL_MIN..=state_mask::COLLATERAL_MAX).contains(&collateral_ratio)
+            {
+                println!(
+                    "  collateral_ratio in [{}, {}]: PASS",
+                    state_mask::COLLATERAL_MIN,
+                    state_mask::COLLATERAL_MAX
+                );
             } else {
                 println!("  collateral_ratio in [{}, {}]: FAIL ({}) — use `debug` to surface the failing constraint", state_mask::COLLATERAL_MIN, state_mask::COLLATERAL_MAX, collateral_ratio);
             }
             if hidden_balance > threshold {
                 println!("  hidden_balance > threshold: PASS ({} > {})", hidden_balance, threshold);
             } else {
-                println!("  hidden_balance > threshold: FAIL ({} <= {})", hidden_balance, threshold);
+                println!(
+                    "  hidden_balance > threshold: FAIL ({} <= {})",
+                    hidden_balance, threshold
+                );
             }
         }
         "tx_privacy" => {
@@ -903,7 +939,7 @@ mod tests {
         let mut file = NamedTempFile::new().unwrap();
         writeln!(
             file,
-            r#"{{"state_value": "42", "nonce": "123", "range_min": "0", "range_max": "255"}}"#
+            r#"{{"state_value": "42", "nonce": "123", "collateral_ratio": "200", "hidden_balance": "500", "threshold": "100"}}"#
         )
         .unwrap();
         run_debug("state_mask", &file.path().to_path_buf(), 10, "text").unwrap();
@@ -912,18 +948,18 @@ mod tests {
     #[test]
     fn test_debug_state_mask_wrong_commitment() {
         let mut file = NamedTempFile::new().unwrap();
-        let json = r#"{"state_value": "42", "nonce": "123", "range_min": "0", "range_max": "255", "_debug": {"commitment": "999"}}"#;
+        let json = r#"{"state_value": "42", "nonce": "123", "collateral_ratio": "200", "hidden_balance": "500", "threshold": "100", "_debug": {"commitment": "999"}}"#;
         writeln!(file, "{}", json).unwrap();
         run_debug("state_mask", &file.path().to_path_buf(), 10, "text").unwrap();
     }
 
     #[test]
     fn test_debug_state_mask_out_of_range_value() {
-        // from_raw() accepts value=300, no panic — MockProver runs
+        // from_raw() accepts collateral_ratio=400, no panic — MockProver runs and detects the range failure
         let mut file = NamedTempFile::new().unwrap();
         writeln!(
             file,
-            r#"{{"state_value": "300", "nonce": "1", "range_min": "0", "range_max": "255"}}"#
+            r#"{{"state_value": "42", "nonce": "1", "collateral_ratio": "400", "hidden_balance": "500", "threshold": "100"}}"#
         )
         .unwrap();
         run_debug("state_mask", &file.path().to_path_buf(), 10, "text").unwrap();
@@ -951,6 +987,7 @@ mod tests {
         // balance_old - amount ≠ balance_new → balance_check gate fails
         let mut file = NamedTempFile::new().unwrap();
         let siblings: Vec<String> = (0..32).map(|i| format!("{}", i + 100)).collect();
+        let indices: Vec<String> = (0..32).map(|_| "0".to_string()).collect();
         let json = serde_json::json!({
             "balance_old": "1000",
             "balance_new": "800",
@@ -958,6 +995,7 @@ mod tests {
             "randomness_new": "84",
             "amount": "300",
             "merkle_siblings": siblings,
+            "merkle_indices": indices,
         });
         writeln!(file, "{}", json).unwrap();
         run_debug("tx_privacy", &file.path().to_path_buf(), 14, "text").unwrap();
@@ -1000,7 +1038,7 @@ mod tests {
     #[test]
     fn test_witness_state_mask_valid() {
         let mut file = NamedTempFile::new().unwrap();
-        let json = r#"{"state_value": "42", "nonce": "123", "range_min": "0", "range_max": "255"}"#;
+        let json = r#"{"state_value": "42", "nonce": "123", "collateral_ratio": "200", "hidden_balance": "500", "threshold": "100"}"#;
         writeln!(file, "{}", json).unwrap();
         run_witness("state_mask", &file.path().to_path_buf()).unwrap();
     }
@@ -1008,7 +1046,7 @@ mod tests {
     #[test]
     fn test_witness_state_mask_out_of_range() {
         let mut file = NamedTempFile::new().unwrap();
-        let json = r#"{"state_value": "300", "nonce": "1", "range_min": "0", "range_max": "255"}"#;
+        let json = r#"{"state_value": "42", "nonce": "1", "collateral_ratio": "400", "hidden_balance": "500", "threshold": "100"}"#;
         writeln!(file, "{}", json).unwrap();
         run_witness("state_mask", &file.path().to_path_buf()).unwrap();
     }
@@ -1033,6 +1071,7 @@ mod tests {
     fn test_witness_tx_privacy() {
         let mut file = NamedTempFile::new().unwrap();
         let siblings: Vec<String> = (0..32).map(|i| format!("{}", i + 100)).collect();
+        let indices: Vec<String> = (0..32).map(|_| "0".to_string()).collect();
         let json = serde_json::json!({
             "balance_old": "1000",
             "balance_new": "700",
@@ -1040,6 +1079,7 @@ mod tests {
             "randomness_new": "84",
             "amount": "300",
             "merkle_siblings": siblings,
+            "merkle_indices": indices,
         });
         writeln!(file, "{}", json).unwrap();
         run_witness("tx_privacy", &file.path().to_path_buf()).unwrap();
@@ -1049,6 +1089,7 @@ mod tests {
     fn test_witness_tx_privacy_wrong_balance() {
         let mut file = NamedTempFile::new().unwrap();
         let siblings: Vec<String> = (0..32).map(|i| format!("{}", i + 100)).collect();
+        let indices: Vec<String> = (0..32).map(|_| "0".to_string()).collect();
         let json = serde_json::json!({
             "balance_old": "1000",
             "balance_new": "500",
@@ -1056,6 +1097,7 @@ mod tests {
             "randomness_new": "84",
             "amount": "300",
             "merkle_siblings": siblings,
+            "merkle_indices": indices,
         });
         writeln!(file, "{}", json).unwrap();
         run_witness("tx_privacy", &file.path().to_path_buf()).unwrap();

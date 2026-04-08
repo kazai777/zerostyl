@@ -87,7 +87,8 @@ fn test_debug_state_mask_valid() {
     let hidden_balance = 500u64;
     let threshold = 100u64;
 
-    let circuit = StateMaskCircuit::new(state_value, nonce, collateral_ratio, hidden_balance, threshold);
+    let circuit =
+        StateMaskCircuit::new(state_value, nonce, collateral_ratio, hidden_balance, threshold);
     let commitment = StateMaskCircuit::compute_commitment(Fp::from(state_value), nonce);
     let public_inputs = vec![vec![commitment, Fp::from(threshold)]];
 

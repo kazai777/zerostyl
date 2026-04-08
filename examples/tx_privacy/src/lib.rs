@@ -144,7 +144,10 @@ impl TxPrivacyCircuit {
             randomness_new: Value::known(randomness_new),
             amount: Value::known(Fp::from(amount)),
             merkle_siblings: merkle_siblings.iter().map(|&s| Value::known(s)).collect(),
-            merkle_indices: merkle_indices.iter().map(|&i| Value::known(Fp::from(i as u64))).collect(),
+            merkle_indices: merkle_indices
+                .iter()
+                .map(|&i| Value::known(Fp::from(i as u64)))
+                .collect(),
         }
     }
 

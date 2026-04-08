@@ -86,7 +86,17 @@ fn bench_tx_privacy_raw(c: &mut Criterion) {
 
     c.bench_function("tx_privacy/raw_mockprover", |b| {
         b.iter_batched(
-            || TxPrivacyCircuit::from_raw(balance_old, balance_new, r_old, r_new, amount, path.clone(), indices.clone()),
+            || {
+                TxPrivacyCircuit::from_raw(
+                    balance_old,
+                    balance_new,
+                    r_old,
+                    r_new,
+                    amount,
+                    path.clone(),
+                    indices.clone(),
+                )
+            },
             |circuit| {
                 let prover = MockProver::run(k, black_box(&circuit), public_inputs.clone())
                     .expect("MockProver::run failed");
@@ -114,7 +124,17 @@ fn bench_tx_privacy_zerostyl(c: &mut Criterion) {
 
     c.bench_function("tx_privacy/zerostyl_debug_circuit", |b| {
         b.iter_batched(
-            || TxPrivacyCircuit::from_raw(balance_old, balance_new, r_old, r_new, amount, path.clone(), indices.clone()),
+            || {
+                TxPrivacyCircuit::from_raw(
+                    balance_old,
+                    balance_new,
+                    r_old,
+                    r_new,
+                    amount,
+                    path.clone(),
+                    indices.clone(),
+                )
+            },
             |circuit| {
                 black_box(
                     debug_circuit(black_box(&circuit), public_inputs.clone(), k, "tx_privacy")
