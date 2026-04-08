@@ -1,10 +1,14 @@
 //! Integration tests for core types in zerostyl-runtime
 
-use zerostyl_runtime::{CircuitConfig, Commitment, CustomGate, HashType, LookupTable, ZkProof};
+use zerostyl_runtime::{
+    CircuitConfig, CommitmentHash, MerklePath, MerkleRoot, RangeProofConfig, ZkProof,
+};
+
+// --- ZkProof ---
 
 #[test]
 fn test_zkproof_creation() {
-    let proof_bytes = vec![0; 64]; // Minimum 32 bytes
+    let proof_bytes = vec![0u8; 64];
     let proof = ZkProof::new(proof_bytes.clone()).unwrap();
 
     assert_eq!(proof.size(), 64);
@@ -13,262 +17,288 @@ fn test_zkproof_creation() {
 
 #[test]
 fn test_zkproof_into_bytes() {
-    let proof_bytes = vec![0; 64]; // Minimum 32 bytes
+    let proof_bytes = vec![0xAB; 64];
     let proof = ZkProof::new(proof_bytes.clone()).unwrap();
 
-    let recovered_bytes = proof.into_bytes();
-    assert_eq!(recovered_bytes, proof_bytes);
+    assert_eq!(proof.into_bytes(), proof_bytes);
 }
 
 #[test]
-fn test_zkproof_serialization() {
-    let proof_bytes = vec![0xDE; 64];
-    let proof = ZkProof::new(proof_bytes).unwrap();
+fn test_zkproof_serialization_roundtrip() {
+    let proof = ZkProof::new(vec![0xDE; 64]).unwrap();
+    let json = serde_json::to_string(&proof).unwrap();
+    let deserialized: ZkProof = serde_json::from_str(&json).unwrap();
 
-    let json = serde_json::to_string(&proof).expect("Failed to serialize proof");
-
-    let deserialized: ZkProof = serde_json::from_str(&json).expect("Failed to deserialize proof");
-
-    assert_eq!(deserialized.as_bytes().len(), 64);
+    assert_eq!(proof, deserialized);
 }
 
 #[test]
-fn test_zkproof_clone() {
-    let proof_bytes = vec![0; 64];
-    let proof1 = ZkProof::new(proof_bytes).unwrap();
-    let proof2 = proof1.clone();
-
-    assert_eq!(proof1.as_bytes(), proof2.as_bytes());
-}
-
-#[test]
-fn test_commitment_creation() {
-    let value = vec![100, 200];
-    let randomness = vec![0; 32]; // Minimum 32 bytes
-
-    let commitment =
-        Commitment::new(value.clone(), randomness.clone(), HashType::Pedersen).unwrap();
-
-    assert_eq!(commitment.value(), &value[..]);
-    assert_eq!(commitment.randomness(), &randomness[..]);
-    assert_eq!(commitment.hash_type(), HashType::Pedersen);
-}
-
-#[test]
-fn test_commitment_serialization() {
-    let commitment = Commitment::new(vec![1, 2, 3], vec![0; 32], HashType::Poseidon).unwrap();
-
-    let json = serde_json::to_string(&commitment).expect("Failed to serialize commitment");
-    let deserialized: Commitment =
-        serde_json::from_str(&json).expect("Failed to deserialize commitment");
-
-    assert_eq!(deserialized.value(), commitment.value());
-    assert_eq!(deserialized.randomness(), commitment.randomness());
-    assert_eq!(deserialized.hash_type(), commitment.hash_type());
-}
-
-#[test]
-fn test_commitment_clone() {
-    let commitment1 = Commitment::new(vec![10, 20], vec![0; 32], HashType::Pedersen).unwrap();
-    let commitment2 = commitment1.clone();
-
-    assert_eq!(commitment1.value(), commitment2.value());
-    assert_eq!(commitment1.randomness(), commitment2.randomness());
-    assert_eq!(commitment1.hash_type(), commitment2.hash_type());
-}
-
-#[test]
-fn test_circuit_config_minimal() {
-    let config = CircuitConfig::minimal(17).unwrap();
-
-    assert_eq!(config.k(), 17);
-    assert_eq!(config.num_rows(), 131_072); // 2^17
-    assert!(config.custom_params().is_empty());
-}
-
-#[test]
-fn test_circuit_config_with_params() {
-    let config =
-        CircuitConfig::new(20, vec![LookupTable::Pedersen], vec![CustomGate::PedersenHash])
-            .unwrap();
-
-    assert_eq!(config.k(), 20);
-    assert_eq!(config.num_rows(), 1_048_576); // 2^20
-    assert_eq!(config.lookup_tables().len(), 1);
-    assert_eq!(config.custom_gates().len(), 1);
-}
-
-#[test]
-fn test_circuit_config_add_param() {
-    let mut config = CircuitConfig::minimal(15).unwrap();
-
-    config.add_param("timeout".to_string(), "30".to_string());
-    assert_eq!(config.custom_params().len(), 1);
-    assert_eq!(config.custom_params().get("timeout"), Some(&"30".to_string()));
-}
-
-#[test]
-fn test_circuit_config_serialization() {
-    let mut config = CircuitConfig::minimal(18).unwrap();
-    config.add_param("privacy_level".to_string(), "high".to_string());
-
-    let json = serde_json::to_string(&config).expect("Failed to serialize config");
-    let deserialized: CircuitConfig =
-        serde_json::from_str(&json).expect("Failed to deserialize config");
-
-    assert_eq!(deserialized.k(), 18);
-    assert_eq!(deserialized.custom_params().len(), 1);
-}
-
-#[test]
-fn test_circuit_config_clone() {
-    let config1 = CircuitConfig::minimal(16).unwrap();
-    let config2 = config1.clone();
-
-    assert_eq!(config1.k(), config2.k());
-    assert_eq!(config1.num_rows(), config2.num_rows());
-}
-
-#[test]
-fn test_zkproof_too_small_error() {
-    let small_proof = vec![0; 16]; // Less than MIN_PROOF_SIZE (32)
-    let result = ZkProof::new(small_proof);
-
+fn test_zkproof_too_small() {
+    let result = ZkProof::new(vec![0; 16]);
     assert!(result.is_err());
-    let err_msg = result.unwrap_err().to_string();
-    assert!(err_msg.contains("Proof too small"));
-    assert!(err_msg.contains("16 bytes"));
+    assert!(result.unwrap_err().to_string().contains("Proof too small"));
 }
 
 #[test]
 fn test_zkproof_exactly_minimum_size() {
-    let proof = ZkProof::new(vec![0; 32]).unwrap(); // Exactly MIN_PROOF_SIZE
+    let proof = ZkProof::new(vec![0; ZkProof::MIN_PROOF_SIZE]).unwrap();
     assert_eq!(proof.size(), 32);
 }
 
 #[test]
-fn test_commitment_empty_value_error() {
-    let empty_value = vec![];
-    let randomness = vec![0; 32];
-    let result = Commitment::new(empty_value, randomness, HashType::Pedersen);
+fn test_zkproof_equality() {
+    let p1 = ZkProof::new(vec![0; 64]).unwrap();
+    let p2 = ZkProof::new(vec![0; 64]).unwrap();
+    let p3 = ZkProof::new(vec![1; 64]).unwrap();
 
-    assert!(result.is_err());
-    let err_msg = result.unwrap_err().to_string();
-    assert!(err_msg.contains("value cannot be empty"));
+    assert_eq!(p1, p2);
+    assert_ne!(p1, p3);
+}
+
+// --- CommitmentHash ---
+
+#[test]
+fn test_commitment_hash_creation() {
+    let bytes = [0xAB; 32];
+    let commitment = CommitmentHash::new(bytes);
+    assert_eq!(commitment.as_bytes(), &bytes);
 }
 
 #[test]
-fn test_commitment_empty_randomness_error() {
-    let value = vec![1, 2, 3];
-    let empty_randomness = vec![];
-    let result = Commitment::new(value, empty_randomness, HashType::Pedersen);
-
-    assert!(result.is_err());
-    let err_msg = result.unwrap_err().to_string();
-    assert!(err_msg.contains("non-empty randomness"));
+fn test_commitment_hash_zero() {
+    let zero = CommitmentHash::zero();
+    assert_eq!(zero.as_bytes(), &[0u8; 32]);
 }
 
 #[test]
-fn test_commitment_short_randomness_error() {
-    let value = vec![1, 2, 3];
-    let short_randomness = vec![0; 16]; // Less than MIN_RANDOMNESS_SIZE (32)
-    let result = Commitment::new(value, short_randomness, HashType::Poseidon);
+fn test_commitment_hash_equality() {
+    let c1 = CommitmentHash::new([1; 32]);
+    let c2 = CommitmentHash::new([1; 32]);
+    let c3 = CommitmentHash::new([2; 32]);
 
-    assert!(result.is_err());
-    let err_msg = result.unwrap_err().to_string();
-    assert!(err_msg.contains("Randomness too short"));
-    assert!(err_msg.contains("16 bytes"));
+    assert_eq!(c1, c2);
+    assert_ne!(c1, c3);
 }
 
 #[test]
-fn test_commitment_exactly_minimum_randomness() {
-    let value = vec![100];
-    let randomness = vec![0; 32]; // Exactly MIN_RANDOMNESS_SIZE
-    let commitment = Commitment::new(value, randomness, HashType::Pedersen).unwrap();
-    assert_eq!(commitment.randomness().len(), 32);
+fn test_commitment_hash_copy() {
+    let c1 = CommitmentHash::new([0xFF; 32]);
+    let c2 = c1; // Copy
+    assert_eq!(c1, c2);
 }
 
 #[test]
-fn test_circuit_config_k_too_small_error() {
-    let result = CircuitConfig::minimal(3); // k < MIN_K (4)
+fn test_commitment_hash_serialization_roundtrip() {
+    let commitment = CommitmentHash::new([0x42; 32]);
+    let json = serde_json::to_string(&commitment).unwrap();
+    let deserialized: CommitmentHash = serde_json::from_str(&json).unwrap();
 
-    assert!(result.is_err());
-    let err_msg = result.unwrap_err().to_string();
-    assert!(err_msg.contains("must be >= 4"));
+    assert_eq!(commitment, deserialized);
+}
+
+// --- MerkleRoot ---
+
+#[test]
+fn test_merkle_root_creation() {
+    let bytes = [0xCD; 32];
+    let root = MerkleRoot::new(bytes);
+    assert_eq!(root.as_bytes(), &bytes);
 }
 
 #[test]
-fn test_circuit_config_k_too_large_error() {
-    let result = CircuitConfig::minimal(29); // k > MAX_K (28)
+fn test_merkle_root_equality() {
+    let r1 = MerkleRoot::new([1; 32]);
+    let r2 = MerkleRoot::new([1; 32]);
+    let r3 = MerkleRoot::new([2; 32]);
 
+    assert_eq!(r1, r2);
+    assert_ne!(r1, r3);
+}
+
+#[test]
+fn test_merkle_root_serialization_roundtrip() {
+    let root = MerkleRoot::new([0xEF; 32]);
+    let json = serde_json::to_string(&root).unwrap();
+    let deserialized: MerkleRoot = serde_json::from_str(&json).unwrap();
+
+    assert_eq!(root, deserialized);
+}
+
+// --- MerklePath ---
+
+#[test]
+fn test_merkle_path_default_depth() {
+    let siblings = vec![[0u8; 32]; MerklePath::DEFAULT_DEPTH];
+    let indices = vec![false; MerklePath::DEFAULT_DEPTH];
+    let path = MerklePath::new(siblings, indices).unwrap();
+
+    assert_eq!(path.depth(), 32);
+}
+
+#[test]
+fn test_merkle_path_small_depth() {
+    let siblings = vec![[1u8; 32]; 4];
+    let indices = vec![true, false, true, false];
+    let path = MerklePath::new(siblings, indices).unwrap();
+
+    assert_eq!(path.depth(), 4);
+    assert_eq!(path.indices(), &[true, false, true, false]);
+}
+
+#[test]
+fn test_merkle_path_rejects_empty() {
+    let result = MerklePath::new(vec![], vec![]);
     assert!(result.is_err());
-    let err_msg = result.unwrap_err().to_string();
-    assert!(err_msg.contains("too large"));
-    assert!(err_msg.contains("max 28"));
+    assert!(result.unwrap_err().to_string().contains("cannot be empty"));
+}
+
+#[test]
+fn test_merkle_path_rejects_length_mismatch() {
+    let result = MerklePath::new(vec![[0; 32]; 5], vec![false; 3]);
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("length mismatch"));
+}
+
+#[test]
+fn test_merkle_path_rejects_exceeding_max_depth() {
+    let depth = MerklePath::MAX_DEPTH + 1;
+    let result = MerklePath::new(vec![[0; 32]; depth], vec![false; depth]);
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("exceeds maximum"));
+}
+
+#[test]
+fn test_merkle_path_max_depth_accepted() {
+    let depth = MerklePath::MAX_DEPTH;
+    let path = MerklePath::new(vec![[0; 32]; depth], vec![false; depth]).unwrap();
+    assert_eq!(path.depth(), 64);
+}
+
+#[test]
+fn test_merkle_path_serialization_roundtrip() {
+    let siblings = vec![[0xAA; 32]; 8];
+    let indices = vec![true, false, true, false, true, false, true, false];
+    let path = MerklePath::new(siblings, indices).unwrap();
+
+    let json = serde_json::to_string(&path).unwrap();
+    let deserialized: MerklePath = serde_json::from_str(&json).unwrap();
+
+    assert_eq!(path, deserialized);
+}
+
+// --- RangeProofConfig ---
+
+#[test]
+fn test_range_proof_config_64bit() {
+    let config = RangeProofConfig::new(64).unwrap();
+    assert_eq!(config.num_bits(), 64);
+    assert_eq!(config.max_value(), u64::MAX as u128);
+}
+
+#[test]
+fn test_range_proof_config_all_supported_widths() {
+    for &bits in &RangeProofConfig::SUPPORTED_BITS {
+        let config = RangeProofConfig::new(bits).unwrap();
+        assert_eq!(config.num_bits(), bits);
+        assert_eq!(config.max_value(), (1u128 << bits) - 1);
+    }
+}
+
+#[test]
+fn test_range_proof_config_rejects_unsupported_width() {
+    let result = RangeProofConfig::new(12);
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("Unsupported"));
+}
+
+#[test]
+fn test_range_proof_config_rejects_zero() {
+    let result = RangeProofConfig::new(0);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_range_proof_config_serialization_roundtrip() {
+    let config = RangeProofConfig::new(32).unwrap();
+    let json = serde_json::to_string(&config).unwrap();
+    let deserialized: RangeProofConfig = serde_json::from_str(&json).unwrap();
+
+    assert_eq!(config, deserialized);
+}
+
+// --- CircuitConfig ---
+
+#[test]
+fn test_circuit_config_minimal() {
+    let config = CircuitConfig::minimal(17).unwrap();
+    assert_eq!(config.k(), 17);
+    assert_eq!(config.num_rows(), 131_072);
+    assert_eq!(config.num_advice_columns(), 1);
+    assert_eq!(config.num_instance_columns(), 1);
+    assert_eq!(config.num_fixed_columns(), 0);
+}
+
+#[test]
+fn test_circuit_config_new_with_columns() {
+    let config = CircuitConfig::new(20, 5, 2, 3).unwrap();
+    assert_eq!(config.k(), 20);
+    assert_eq!(config.num_advice_columns(), 5);
+    assert_eq!(config.num_instance_columns(), 2);
+    assert_eq!(config.num_fixed_columns(), 3);
+}
+
+#[test]
+fn test_circuit_config_k_too_small() {
+    let result = CircuitConfig::minimal(3);
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("must be >= 4"));
+}
+
+#[test]
+fn test_circuit_config_k_too_large() {
+    let result = CircuitConfig::minimal(29);
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("too large"));
 }
 
 #[test]
 fn test_circuit_config_k_boundary_min() {
-    let config = CircuitConfig::minimal(4).unwrap(); // Exactly MIN_K
+    let config = CircuitConfig::minimal(CircuitConfig::MIN_K).unwrap();
     assert_eq!(config.k(), 4);
-    assert_eq!(config.num_rows(), 16); // 2^4
+    assert_eq!(config.num_rows(), 16);
 }
 
 #[test]
 fn test_circuit_config_k_boundary_max() {
-    let config = CircuitConfig::minimal(28).unwrap(); // Exactly MAX_K
+    let config = CircuitConfig::minimal(CircuitConfig::MAX_K).unwrap();
     assert_eq!(config.k(), 28);
-    assert_eq!(config.num_rows(), 268_435_456); // 2^28
-}
-
-#[test]
-fn test_circuit_config_new_with_tables_and_gates() {
-    let config = CircuitConfig::new(
-        15,
-        vec![LookupTable::Sha256, LookupTable::Pedersen],
-        vec![CustomGate::MerklePathGate, CustomGate::PedersenHash],
-    )
-    .unwrap();
-
-    assert_eq!(config.lookup_tables().len(), 2);
-    assert_eq!(config.custom_gates().len(), 2);
-    assert_eq!(config.lookup_tables()[0], LookupTable::Sha256);
-    assert_eq!(config.custom_gates()[0], CustomGate::MerklePathGate);
+    assert_eq!(config.num_rows(), 268_435_456);
 }
 
 #[test]
 fn test_circuit_config_new_k_validation() {
-    let result = CircuitConfig::new(2, vec![], vec![]); // k < MIN_K
+    let result = CircuitConfig::new(2, 1, 1, 0);
     assert!(result.is_err());
 
-    let result2 = CircuitConfig::new(30, vec![], vec![]); // k > MAX_K
+    let result2 = CircuitConfig::new(30, 1, 1, 0);
     assert!(result2.is_err());
 }
 
 #[test]
-fn test_hashtype_variants() {
-    let pedersen = HashType::Pedersen;
-    let poseidon = HashType::Poseidon;
+fn test_circuit_config_serialization_roundtrip() {
+    let config = CircuitConfig::new(18, 4, 2, 1).unwrap();
+    let json = serde_json::to_string(&config).unwrap();
+    let deserialized: CircuitConfig = serde_json::from_str(&json).unwrap();
 
-    assert_ne!(pedersen, poseidon);
-    assert_eq!(pedersen, HashType::Pedersen);
-    assert_eq!(poseidon, HashType::Poseidon);
+    assert_eq!(config, deserialized);
 }
 
 #[test]
-fn test_lookup_table_variants() {
-    let sha = LookupTable::Sha256;
-    let ped = LookupTable::Pedersen;
+fn test_circuit_config_equality() {
+    let c1 = CircuitConfig::minimal(15).unwrap();
+    let c2 = CircuitConfig::minimal(15).unwrap();
+    let c3 = CircuitConfig::minimal(16).unwrap();
 
-    assert_ne!(sha, ped);
-    assert_eq!(sha, LookupTable::Sha256);
-}
-
-#[test]
-fn test_custom_gate_variants() {
-    let gate1 = CustomGate::PedersenHash;
-    let gate2 = CustomGate::MerklePathGate;
-
-    assert_ne!(gate1, gate2);
-    assert_eq!(gate1, CustomGate::PedersenHash);
+    assert_eq!(c1, c2);
+    assert_ne!(c1, c3);
 }

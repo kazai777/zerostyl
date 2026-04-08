@@ -3,18 +3,25 @@
 use crate::error::{CompilerError, Result};
 use syn::{Attribute, Field, Fields, Item, ItemStruct};
 
+/// A field annotated with `#[zk_private]` in the source contract.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrivateField {
+    /// Field name as declared in the struct.
     pub name: String,
+    /// Rust type as a string (e.g. `"u64"`, `"[u8; 32]"`).
     pub field_type: String,
 }
 
+/// Result of parsing a Rust struct with `#[zk_private]` annotations.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedContract {
+    /// Name of the parsed struct.
     pub contract_name: String,
+    /// Fields annotated with `#[zk_private]`.
     pub private_fields: Vec<PrivateField>,
 }
 
+/// Parse a Rust source string and extract the first struct with `#[zk_private]` fields.
 pub fn parse_contract(input: &str) -> Result<ParsedContract> {
     let ast: syn::File = syn::parse_str(input)?;
 

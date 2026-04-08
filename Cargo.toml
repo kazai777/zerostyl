@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/zerostyl-compiler",
+    "crates/zerostyl-cli",
     "crates/zerostyl-debugger",
     "crates/zerostyl-exporter",
     "crates/zerostyl-runtime",
@@ -9,8 +10,6 @@ members = [
     "examples/tx_privacy",
     "examples/state_mask",
     "examples/private_vote",
-    # "examples/kyc_proof",
-    # "examples/dark_pool_order",
 ]
 
 [workspace.package]
@@ -19,5 +18,13 @@ edition = "2021"
 authors = ["kazai777 <kazai777.dev@gmail.com>"]
 license = "MIT"
 repository = "https://github.com/kazai777/zerostyl"
+
+# Release profile optimized for Stylus (small WASM)
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
 
 [workspace.dependencies]

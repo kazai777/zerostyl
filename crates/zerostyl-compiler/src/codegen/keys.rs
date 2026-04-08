@@ -16,19 +16,26 @@ use std::{
     path::{Path, PathBuf},
 };
 
+/// Metadata about a circuit's key configuration, stored alongside cached keys.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct KeyMetadata {
+    /// Circuit name identifier.
     pub circuit_name: String,
+    /// Circuit size parameter (rows = 2^k).
     pub k: u32,
+    /// Number of public input columns.
     pub num_public_inputs: usize,
+    /// Number of private witness columns.
     pub num_private_witnesses: usize,
 }
 
+/// Manages generation and disk caching of IPA parameters, proving keys, and verifying keys.
 pub struct KeyManager {
     cache_dir: PathBuf,
 }
 
 impl KeyManager {
+    /// Create a new key manager with the given cache directory (created if needed).
     pub fn new<P: AsRef<Path>>(cache_dir: P) -> Result<Self> {
         let cache_dir = cache_dir.as_ref().to_path_buf();
         fs::create_dir_all(&cache_dir).context("Failed to create key cache directory")?;
@@ -36,14 +43,17 @@ impl KeyManager {
         Ok(Self { cache_dir })
     }
 
+    /// Returns the file path where IPA params for the given `k` would be cached.
     pub fn params_path(&self, k: u32) -> PathBuf {
         self.cache_dir.join(format!("params_k{}.bin", k))
     }
 
+    /// Returns the file path where key metadata for a circuit would be cached.
     pub fn metadata_path(&self, circuit_name: &str, k: u32) -> PathBuf {
         self.cache_dir.join(format!("{}_k{}_metadata.json", circuit_name, k))
     }
 
+    /// Generate or load cached IPA parameters for the given `k`.
     pub fn generate_params(&self, k: u32) -> Result<Params<EqAffine>> {
         let params_path = self.params_path(k);
 
@@ -71,6 +81,7 @@ impl KeyManager {
         Ok(())
     }
 
+    /// Load previously cached IPA parameters for the given `k`.
     pub fn load_params(&self, k: u32) -> Result<Params<EqAffine>> {
         let path = self.params_path(k);
         let mut file =
@@ -79,6 +90,7 @@ impl KeyManager {
         Params::<EqAffine>::read(&mut file).context("Failed to deserialize params")
     }
 
+    /// Generate proving and verifying keys for a circuit, caching params and metadata.
     pub fn generate_keys<C>(
         &self,
         circuit: &C,
@@ -117,6 +129,7 @@ impl KeyManager {
         Ok(())
     }
 
+    /// Load previously saved key metadata for a circuit.
     pub fn load_metadata(&self, circuit_name: &str, k: u32) -> Result<KeyMetadata> {
         let meta_path = self.metadata_path(circuit_name, k);
         let content = fs::read_to_string(&meta_path)

@@ -152,8 +152,9 @@ struct StateMaskDebugOverrides {
 struct StateMaskWitness {
     state_value: String,
     nonce: String,
-    range_min: String,
-    range_max: String,
+    collateral_ratio: String,
+    hidden_balance: String,
+    threshold: String,
     #[serde(rename = "_debug", default)]
     debug: StateMaskDebugOverrides,
 }
@@ -173,6 +174,7 @@ struct TxPrivacyWitness {
     randomness_new: String,
     amount: String,
     merkle_siblings: Vec<String>,
+    merkle_indices: Vec<String>,
     #[serde(rename = "_debug", default)]
     debug: TxPrivacyDebugOverrides,
 }
@@ -298,38 +300,27 @@ fn run_schema(circuit_name: &str) -> Result<()> {
             println!(r#"  {{"a": "2", "b": "3", "sum": "5"}}"#);
         }
         "state_mask" => {
-            println!("Circuit: state_mask (Range Proof)");
+            println!("Circuit: state_mask (Privacy-preserving state proof)");
             println!();
             println!("JSON fields:");
-            println!(
-                "  state_value  string  required  Secret value to prove is in [range_min, range_max] (u64)"
-            );
-            println!(
-                "  nonce        string  required  Commitment randomness (u64 decimal or 0x hex)"
-            );
-            println!("  range_min    string  required  Range lower bound, inclusive (u64)");
-            println!("  range_max    string  required  Range upper bound, inclusive (u64, max span = 255)");
+            println!("  state_value      string  required  Secret value committed via Poseidon (u64)");
+            println!("  nonce            string  required  Commitment randomness (u64 or 0x hex)");
+            println!("  collateral_ratio string  required  Ratio to prove in [{}, {}] (u64)", state_mask::COLLATERAL_MIN, state_mask::COLLATERAL_MAX);
+            println!("  hidden_balance   string  required  Balance to prove > threshold (u64)");
+            println!("  threshold        string  required  Minimum balance required (u64, public)");
             println!();
             println!("Optional _debug overrides:");
-            println!(
-                "  _debug.commitment  string  Override the commitment cell to force a gate failure"
-            );
-            println!("                             The same value is used as the public input.");
+            println!("  _debug.commitment  string  Use as commitment public input instead of Poseidon(state_value, nonce)");
             println!();
-            println!("Public inputs derived: [commitment = state_value + nonce]");
+            println!("Public inputs: [commitment = Poseidon(state_value, nonce), threshold]");
             println!();
             println!("Gates:");
-            println!("  commitment    — state_value + nonce == commitment");
-            println!("  bit_check     — each bit is boolean: bit * (bit - 1) == 0");
-            println!("  bit_decompose — accumulation: acc + bit * 2^i == acc_next");
+            println!("  commitment   — Poseidon(state_value, nonce) == commitment");
+            println!("  range_check  — collateral_ratio in [{}, {}]", state_mask::COLLATERAL_MIN, state_mask::COLLATERAL_MAX);
+            println!("  comparison   — hidden_balance > threshold");
             println!();
-            println!("Examples:");
-            println!(
-                r#"  Valid:   {{"state_value": "42", "nonce": "123", "range_min": "0", "range_max": "255"}}"#
-            );
-            println!(
-                r#"  Broken:  add {{"_debug": {{"commitment": "999"}}}} → commitment gate fails"#
-            );
+            println!("Example:");
+            println!(r#"  {{"state_value":"1000","nonce":"42","collateral_ratio":"200","hidden_balance":"500","threshold":"100"}}"#);
         }
         "tx_privacy" => {
             println!("Circuit: tx_privacy (Private Transfer)");
@@ -337,35 +328,25 @@ fn run_schema(circuit_name: &str) -> Result<()> {
             println!("JSON fields:");
             println!("  balance_old      string    required  Sender balance before transfer (u64)");
             println!("  balance_new      string    required  Sender balance after transfer (u64)");
-            println!(
-                "  randomness_old   string    required  Commitment randomness for old balance"
-            );
-            println!(
-                "  randomness_new   string    required  Commitment randomness for new balance"
-            );
+            println!("  randomness_old   string    required  Commitment randomness for old balance");
+            println!("  randomness_new   string    required  Commitment randomness for new balance");
             println!("  amount           string    required  Transfer amount (u64)");
-            println!(
-                "  merkle_siblings  string[]  required  Merkle path siblings (exactly {} values)",
-                MERKLE_DEPTH
-            );
+            println!("  merkle_siblings  string[]  required  Merkle path sibling hashes ({} values)", MERKLE_DEPTH);
+            println!("  merkle_indices   string[]  required  Merkle path direction bits 0/1 ({} values)", MERKLE_DEPTH);
             println!();
             println!("Optional _debug overrides:");
-            println!("  _debug.commitment_old  string  Override commitment_old cell");
-            println!("  _debug.commitment_new  string  Override commitment_new cell");
+            println!("  _debug.commitment_old  string  Override commitment_old public input");
+            println!("  _debug.commitment_new  string  Override commitment_new public input");
             println!("  _debug.merkle_root     string  Override merkle_root public input");
             println!();
-            println!("Public inputs derived: [commitment_old, commitment_new, merkle_root]");
+            println!("Public inputs: [commitment_old, commitment_new, merkle_root]");
             println!();
             println!("Gates:");
-            println!("  commitment    — balance + randomness == commitment");
+            println!("  commitment    — Poseidon(balance, randomness) == commitment");
             println!("  balance_check — balance_old - amount == balance_new");
-            println!(
-                "  merkle        — current + sibling == next (repeated {} times)",
-                MERKLE_DEPTH
-            );
+            println!("  merkle        — Poseidon Merkle path verification (depth {})", MERKLE_DEPTH);
             println!();
-            println!("Note: inconsistent balance_old/amount/balance_new (without _debug)");
-            println!("      triggers the 'balance_check' gate failure automatically.");
+            println!("Note: inconsistent balance_old/amount/balance_new triggers balance_check failure.");
         }
         "private_vote" => {
             println!("Circuit: private_vote (Anonymous Voting)");
@@ -448,8 +429,12 @@ fn run_debug(circuit_name: &str, witnesses_path: &PathBuf, k: u32, format: &str)
             let state_value: u64 =
                 w.state_value.parse().context("field 'state_value': expected u64")?;
             let nonce = parse_field(&w.nonce).context("field 'nonce'")?;
-            let range_min: u64 = w.range_min.parse().context("field 'range_min': expected u64")?;
-            let range_max: u64 = w.range_max.parse().context("field 'range_max': expected u64")?;
+            let collateral_ratio: u64 =
+                w.collateral_ratio.parse().context("field 'collateral_ratio': expected u64")?;
+            let hidden_balance: u64 =
+                w.hidden_balance.parse().context("field 'hidden_balance': expected u64")?;
+            let threshold: u64 =
+                w.threshold.parse().context("field 'threshold': expected u64")?;
 
             let commitment_override = w
                 .debug
@@ -462,14 +447,14 @@ fn run_debug(circuit_name: &str, witnesses_path: &PathBuf, k: u32, format: &str)
             let circuit = StateMaskCircuit::from_raw(
                 state_value,
                 nonce,
-                range_min,
-                range_max,
-                commitment_override,
+                collateral_ratio,
+                hidden_balance,
+                threshold,
             );
             let commitment = commitment_override.unwrap_or_else(|| {
                 StateMaskCircuit::compute_commitment(Fp::from(state_value), nonce)
             });
-            debug_circuit(&circuit, vec![vec![commitment]], k, circuit_name)?
+            debug_circuit(&circuit, vec![vec![commitment, Fp::from(threshold)]], k, circuit_name)?
         }
         "tx_privacy" => {
             let w: TxPrivacyWitness = parse_witness_json(&content, "tx_privacy")?;
@@ -490,9 +475,26 @@ fn run_debug(circuit_name: &str, witnesses_path: &PathBuf, k: u32, format: &str)
                     w.merkle_siblings.len()
                 );
             }
+            if w.merkle_indices.len() != MERKLE_DEPTH {
+                anyhow::bail!(
+                    "Expected {} merkle_indices, got {}",
+                    MERKLE_DEPTH,
+                    w.merkle_indices.len()
+                );
+            }
             let merkle_siblings: Result<Vec<Fp>> =
                 w.merkle_siblings.iter().map(|s| parse_field(s)).collect();
             let merkle_siblings = merkle_siblings.context("field 'merkle_siblings'")?;
+            let merkle_indices: Result<Vec<bool>> = w
+                .merkle_indices
+                .iter()
+                .map(|s| {
+                    let v: u64 =
+                        s.parse().context("field 'merkle_indices': expected 0 or 1")?;
+                    Ok(v != 0)
+                })
+                .collect();
+            let merkle_indices = merkle_indices?;
 
             let commitment_old_override = w
                 .debug
@@ -523,8 +525,7 @@ fn run_debug(circuit_name: &str, witnesses_path: &PathBuf, k: u32, format: &str)
                 randomness_new,
                 amount,
                 merkle_siblings.clone(),
-                commitment_old_override,
-                commitment_new_override,
+                merkle_indices.clone(),
             );
             let commitment_old = commitment_old_override.unwrap_or_else(|| {
                 TxPrivacyCircuit::compute_commitment(Fp::from(balance_old), randomness_old)
@@ -533,7 +534,7 @@ fn run_debug(circuit_name: &str, witnesses_path: &PathBuf, k: u32, format: &str)
                 TxPrivacyCircuit::compute_commitment(Fp::from(balance_new), randomness_new)
             });
             let merkle_root = merkle_root_override.unwrap_or_else(|| {
-                TxPrivacyCircuit::compute_merkle_root(commitment_old, &merkle_siblings)
+                TxPrivacyCircuit::compute_merkle_root(commitment_old, &merkle_siblings, &merkle_indices)
             });
             debug_circuit(
                 &circuit,
@@ -573,8 +574,6 @@ fn run_debug(circuit_name: &str, witnesses_path: &PathBuf, k: u32, format: &str)
                 vote,
                 randomness_vote,
                 threshold,
-                balance_commitment_override,
-                vote_commitment_override,
             );
             let balance_commitment = balance_commitment_override.unwrap_or_else(|| {
                 PrivateVoteCircuit::compute_commitment(Fp::from(balance), randomness_balance)
@@ -634,17 +633,23 @@ fn run_witness(circuit_name: &str, witnesses_path: &PathBuf) -> Result<()> {
             let state_value: u64 =
                 w.state_value.parse().context("field 'state_value': expected u64")?;
             let nonce = parse_field(&w.nonce).context("field 'nonce'")?;
-            let range_min: u64 = w.range_min.parse().context("field 'range_min': expected u64")?;
-            let range_max: u64 = w.range_max.parse().context("field 'range_max': expected u64")?;
+            let collateral_ratio: u64 =
+                w.collateral_ratio.parse().context("field 'collateral_ratio': expected u64")?;
+            let hidden_balance: u64 =
+                w.hidden_balance.parse().context("field 'hidden_balance': expected u64")?;
+            let threshold: u64 =
+                w.threshold.parse().context("field 'threshold': expected u64")?;
 
             println!("Circuit: state_mask");
             println!();
             println!("Private witnesses:");
-            println!("  state_value = {}", state_value);
-            println!("  nonce       = {}", w.nonce);
-            println!("  range_min   = {}", range_min);
-            println!("  range_max   = {}", range_max);
+            println!("  state_value      = {}", state_value);
+            println!("  nonce            = {}", w.nonce);
+            println!("  collateral_ratio = {}", collateral_ratio);
+            println!("  hidden_balance   = {}", hidden_balance);
             println!();
+            println!("Public inputs:");
+            println!("  threshold        = {}", threshold);
 
             let commitment = StateMaskCircuit::compute_commitment(Fp::from(state_value), nonce);
             println!("Derived public inputs:");
@@ -652,13 +657,15 @@ fn run_witness(circuit_name: &str, witnesses_path: &PathBuf) -> Result<()> {
             println!();
 
             println!("Validation:");
-            if state_value >= range_min && state_value <= range_max {
-                println!("  value in [{}, {}]: PASS ({})", range_min, range_max, state_value);
+            if collateral_ratio >= state_mask::COLLATERAL_MIN && collateral_ratio <= state_mask::COLLATERAL_MAX {
+                println!("  collateral_ratio in [{}, {}]: PASS", state_mask::COLLATERAL_MIN, state_mask::COLLATERAL_MAX);
             } else {
-                println!(
-                    "  value in [{}, {}]: FAIL (got {}) — use `debug` to find the failing constraint",
-                    range_min, range_max, state_value
-                );
+                println!("  collateral_ratio in [{}, {}]: FAIL ({}) — use `debug` to surface the failing constraint", state_mask::COLLATERAL_MIN, state_mask::COLLATERAL_MAX, collateral_ratio);
+            }
+            if hidden_balance > threshold {
+                println!("  hidden_balance > threshold: PASS ({} > {})", hidden_balance, threshold);
+            } else {
+                println!("  hidden_balance > threshold: FAIL ({} <= {})", hidden_balance, threshold);
             }
         }
         "tx_privacy" => {
@@ -682,18 +689,24 @@ fn run_witness(circuit_name: &str, witnesses_path: &PathBuf) -> Result<()> {
             println!("  randomness_new = {}", w.randomness_new);
             println!("  amount         = {}", amount);
             println!("  merkle_siblings: {} entries", w.merkle_siblings.len());
+            println!("  merkle_indices:  {} entries", w.merkle_indices.len());
             println!();
 
-            if w.merkle_siblings.len() == MERKLE_DEPTH {
+            if w.merkle_siblings.len() == MERKLE_DEPTH && w.merkle_indices.len() == MERKLE_DEPTH {
                 let siblings: Result<Vec<Fp>> =
                     w.merkle_siblings.iter().map(|s| parse_field(s)).collect();
-                if let Ok(siblings) = siblings {
+                let indices: Result<Vec<bool>> = w
+                    .merkle_indices
+                    .iter()
+                    .map(|s| Ok(s.parse::<u64>().context("merkle_indices")? != 0))
+                    .collect();
+                if let (Ok(siblings), Ok(indices)) = (siblings, indices) {
                     let commitment_old =
                         TxPrivacyCircuit::compute_commitment(Fp::from(balance_old), randomness_old);
                     let commitment_new =
                         TxPrivacyCircuit::compute_commitment(Fp::from(balance_new), randomness_new);
                     let merkle_root =
-                        TxPrivacyCircuit::compute_merkle_root(commitment_old, &siblings);
+                        TxPrivacyCircuit::compute_merkle_root(commitment_old, &siblings, &indices);
                     println!("Derived public inputs:");
                     println!("  commitment_old = {:?}", commitment_old);
                     println!("  commitment_new = {:?}", commitment_new);

@@ -81,14 +81,15 @@ fn test_inspect_stats_serialization_roundtrip() {
 
 #[test]
 fn test_debug_state_mask_valid() {
-    let state_value = 42u64;
-    let nonce = Fp::from(123u64);
-    let range_min = 0u64;
-    let range_max = 255u64;
+    let state_value = 1000u64;
+    let nonce = Fp::from(42u64);
+    let collateral_ratio = 200u64;
+    let hidden_balance = 500u64;
+    let threshold = 100u64;
 
-    let circuit = StateMaskCircuit::new(state_value, nonce, range_min, range_max);
+    let circuit = StateMaskCircuit::new(state_value, nonce, collateral_ratio, hidden_balance, threshold);
     let commitment = StateMaskCircuit::compute_commitment(Fp::from(state_value), nonce);
-    let public_inputs = vec![vec![commitment]];
+    let public_inputs = vec![vec![commitment, Fp::from(threshold)]];
 
     let report = debug_circuit(&circuit, public_inputs, 10, "state_mask").unwrap();
     assert!(report.is_satisfied);
@@ -122,16 +123,14 @@ fn test_debug_private_vote_valid() {
 
 #[test]
 fn test_debug_state_mask_wrong_commitment() {
-    let state_value = 42u64;
-    let nonce = Fp::from(123u64);
-    let range_min = 0u64;
-    let range_max = 255u64;
+    let state_value = 1000u64;
+    let nonce = Fp::from(42u64);
 
-    let circuit = StateMaskCircuit::new(state_value, nonce, range_min, range_max);
+    let circuit = StateMaskCircuit::from_raw(state_value, nonce, 200, 500, 100);
 
-    // Wrong commitment: use Fp::from(999) instead of the real commitment
+    // Wrong commitment: use Fp::from(999) instead of the real Poseidon commitment
     let wrong_commitment = Fp::from(999u64);
-    let public_inputs = vec![vec![wrong_commitment]];
+    let public_inputs = vec![vec![wrong_commitment, Fp::from(100u64)]];
 
     let report = debug_circuit(&circuit, public_inputs, 10, "state_mask").unwrap();
     assert!(!report.is_satisfied);
@@ -197,15 +196,13 @@ fn test_debug_private_vote_wrong_vote_commitment() {
 #[test]
 fn test_debug_report_failure_structure() {
     // Create a deliberately broken circuit with wrong public input
-    let state_value = 42u64;
+    let state_value = 1000u64;
     let nonce = Fp::from(7u64);
-    let range_min = 0u64;
-    let range_max = 255u64;
 
-    let circuit = StateMaskCircuit::new(state_value, nonce, range_min, range_max);
+    let circuit = StateMaskCircuit::from_raw(state_value, nonce, 200, 500, 100);
 
     // Completely wrong public inputs
-    let wrong_inputs = vec![vec![Fp::from(999u64)]];
+    let wrong_inputs = vec![vec![Fp::from(999u64), Fp::from(100u64)]];
     let report = debug_circuit(&circuit, wrong_inputs, 10, "state_mask").unwrap();
 
     assert!(!report.is_satisfied);
@@ -226,10 +223,10 @@ fn test_debug_report_failure_structure() {
 
 #[test]
 fn test_debug_report_serialization_with_failures() {
-    let state_value = 42u64;
+    let state_value = 1000u64;
     let nonce = Fp::from(123u64);
-    let circuit = StateMaskCircuit::new(state_value, nonce, 0, 255);
-    let wrong_inputs = vec![vec![Fp::from(0u64)]];
+    let circuit = StateMaskCircuit::from_raw(state_value, nonce, 200, 500, 100);
+    let wrong_inputs = vec![vec![Fp::from(0u64), Fp::from(100u64)]];
 
     let report = debug_circuit(&circuit, wrong_inputs, 10, "state_mask").unwrap();
     assert!(!report.is_satisfied);
@@ -321,12 +318,12 @@ fn test_debug_failure_cell_values_have_column_info() {
 #[test]
 fn test_debug_multiple_failures_display() {
     // A circuit with intentionally many wrong public inputs will produce multiple failures
-    let state_value = 42u64;
+    let state_value = 1000u64;
     let nonce = Fp::from(123u64);
-    let circuit = StateMaskCircuit::new(state_value, nonce, 0, 255);
+    let circuit = StateMaskCircuit::from_raw(state_value, nonce, 200, 500, 100);
 
     // Wrong public input
-    let wrong_inputs = vec![vec![Fp::from(0u64)]];
+    let wrong_inputs = vec![vec![Fp::from(0u64), Fp::from(100u64)]];
     let report = debug_circuit(&circuit, wrong_inputs, 10, "state_mask").unwrap();
 
     assert!(!report.is_satisfied);
@@ -367,9 +364,9 @@ fn test_inspect_private_vote_constraints_list() {
 
 #[test]
 fn test_debug_state_mask_insufficient_k() {
-    let circuit = StateMaskCircuit::new(42, Fp::from(123u64), 0, 255);
-    let commitment = StateMaskCircuit::compute_commitment(Fp::from(42u64), Fp::from(123u64));
-    let public_inputs = vec![vec![commitment]];
+    let circuit = StateMaskCircuit::new(1000, Fp::from(42u64), 200, 500, 100);
+    let commitment = StateMaskCircuit::compute_commitment(Fp::from(1000u64), Fp::from(42u64));
+    let public_inputs = vec![vec![commitment, Fp::from(100u64)]];
 
     // k=4 is too small for state_mask circuit
     let result = debug_circuit(&circuit, public_inputs, 4, "state_mask");

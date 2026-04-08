@@ -1,17 +1,11 @@
 //! Benchmark for the private vote circuit.
 //!
-//! ## Important Caveat
-//!
-//! These benchmarks use **simplified binding commitments** (`value + randomness`)
-//! instead of true Pedersen commitments (elliptic curve point multiplication).
-//!
-//! A production implementation with real Pedersen commitments (using EccChip) would:
-//! - Require significantly more constraints (hundreds to thousands more)
-//! - Need a larger circuit size (k=12-14 instead of k=10)
-//! - Be approximately 10-100x slower
-//!
-//! These benchmarks are representative of the current M2 implementation,
-//! NOT of a cryptographically secure production system.
+//! Uses Poseidon commitments (P128Pow5T3, 128-bit security, width=3, rate=2)
+//! for both balance and vote hiding. The circuit proves:
+//! - balance_commitment == Poseidon(balance, randomness_balance)
+//! - vote_commitment == Poseidon(vote, randomness_vote)
+//! - vote ∈ {0, 1}
+//! - balance >= threshold (via range proof on balance - threshold)
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use halo2_proofs::dev::MockProver;
@@ -35,7 +29,7 @@ fn bench_private_vote_mock(c: &mut Criterion) {
 
     c.bench_function("private_vote_mock_prover", |b| {
         b.iter(|| {
-            let prover = MockProver::run(10, &circuit, vec![public_inputs.clone()]).unwrap();
+            let prover = MockProver::run(11, &circuit, vec![public_inputs.clone()]).unwrap();
             prover.verify().unwrap();
         });
     });

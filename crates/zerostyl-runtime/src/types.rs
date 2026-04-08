@@ -5,15 +5,6 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Hash function type for cryptographic commitments
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum HashType {
-    /// Pedersen hash (efficient in circuits, elliptic curves)
-    Pedersen,
-    /// Poseidon hash (optimized for zk-SNARKs)
-    Poseidon,
-}
-
 /// Represents a zero-knowledge SNARK proof
 ///
 /// A `ZkProof` encapsulates the binary representation of a zk-SNARK proof
@@ -35,12 +26,15 @@ pub struct ZkProof {
 }
 
 impl ZkProof {
+    /// Minimum size in bytes for a valid halo2 IPA proof.
     pub const MIN_PROOF_SIZE: usize = 32;
 
-    /// Creates a new ZkProof with validation
+    /// Creates a new `ZkProof` with validation.
     ///
     /// # Errors
-    /// Returns error if proof data is smaller than MIN_PROOF_SIZE
+    ///
+    /// Returns [`ZeroStylError::InvalidProof`](crate::ZeroStylError::InvalidProof)
+    /// if `proof_data` is smaller than [`MIN_PROOF_SIZE`](Self::MIN_PROOF_SIZE).
     pub fn new(proof_data: Vec<u8>) -> crate::Result<Self> {
         if proof_data.len() < Self::MIN_PROOF_SIZE {
             return Err(crate::ZeroStylError::InvalidProof(format!(
@@ -52,109 +46,235 @@ impl ZkProof {
         Ok(Self { proof_data })
     }
 
+    /// Returns the proof size in bytes.
+    #[must_use]
     pub fn size(&self) -> usize {
         self.proof_data.len()
     }
 
+    /// Returns the raw proof bytes.
+    #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
         &self.proof_data
     }
 
+    /// Consumes self and returns the inner byte vector.
+    #[must_use]
     pub fn into_bytes(self) -> Vec<u8> {
         self.proof_data
     }
 }
 
-/// Cryptographic commitment for privacy-preserving operations
+/// Result of a Poseidon hash commitment: `Poseidon(value, randomness)`.
 ///
-/// A `Commitment` hides sensitive data while allowing verification of its properties
-/// in zero-knowledge proofs.
+/// Stored as 32 bytes representing a field element from the Pasta Fp curve.
+/// This is the on-chain representation — the preimage (value, randomness) is private.
 ///
 /// # Examples
 ///
 /// ```
-/// use zerostyl_runtime::{Commitment, HashType};
+/// use zerostyl_runtime::CommitmentHash;
 ///
-/// let value = vec![1, 2, 3, 4];
-/// let randomness = vec![5; 32];
-/// let commitment = Commitment::new(value, randomness, HashType::Pedersen).unwrap();
+/// let hash_bytes = [0xab_u8; 32];
+/// let commitment = CommitmentHash::new(hash_bytes);
+/// assert_eq!(commitment.as_bytes(), &[0xab; 32]);
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Commitment {
-    value: Vec<u8>,
-    randomness: Vec<u8>,
-    hash_type: HashType,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct CommitmentHash([u8; 32]);
+
+impl CommitmentHash {
+    /// Creates a new commitment hash from raw bytes.
+    #[must_use]
+    pub fn new(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+
+    /// Returns the raw 32-byte hash.
+    #[must_use]
+    pub fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+
+    /// Returns a commitment hash with all zero bytes (for testing/initialization).
+    #[must_use]
+    pub fn zero() -> Self {
+        Self([0u8; 32])
+    }
 }
 
-impl Commitment {
-    pub const MIN_RANDOMNESS_SIZE: usize = 32;
+/// Merkle tree root hash (Poseidon-based).
+///
+/// Represents the root of a Poseidon Merkle tree.
+/// Stored as 32 bytes representing a Pasta Fp field element.
+///
+/// # Examples
+///
+/// ```
+/// use zerostyl_runtime::MerkleRoot;
+///
+/// let root = MerkleRoot::new([0xff_u8; 32]);
+/// assert_eq!(root.as_bytes(), &[0xff; 32]);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct MerkleRoot([u8; 32]);
 
-    /// Creates a new commitment with validation
-    ///
-    /// # Arguments
-    /// * `value` - Value to commit to (cannot be empty)
-    /// * `randomness` - Random nonce for hiding (minimum 32 bytes)
-    /// * `hash_type` - Hash function to use
+impl MerkleRoot {
+    /// Creates a new Merkle root from raw bytes.
+    #[must_use]
+    pub fn new(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+
+    /// Returns the raw 32-byte root hash.
+    #[must_use]
+    pub fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+}
+
+/// Merkle proof path for membership verification.
+///
+/// Contains the sibling hashes and path indices needed to recompute
+/// a Merkle root from a leaf. Used with Poseidon hash at each level.
+///
+/// # Examples
+///
+/// ```
+/// use zerostyl_runtime::MerklePath;
+///
+/// let siblings = vec![[0u8; 32]; 32];
+/// let indices = vec![false; 32];
+/// let path = MerklePath::new(siblings, indices).unwrap();
+/// assert_eq!(path.depth(), 32);
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MerklePath {
+    siblings: Vec<[u8; 32]>,
+    indices: Vec<bool>,
+}
+
+impl MerklePath {
+    /// Standard Merkle tree depth (2^32 ~4 billion leaves).
+    pub const DEFAULT_DEPTH: usize = 32;
+
+    /// Maximum supported Merkle tree depth.
+    pub const MAX_DEPTH: usize = 64;
+
+    /// Creates a new Merkle path with validation.
     ///
     /// # Errors
-    /// Returns error if value is empty or randomness is too short
-    pub fn new(value: Vec<u8>, randomness: Vec<u8>, hash_type: HashType) -> crate::Result<Self> {
-        if value.is_empty() {
-            return Err(crate::ZeroStylError::InvalidCommitment(
-                "Commitment value cannot be empty".to_string(),
-            ));
-        }
-        if randomness.is_empty() {
-            return Err(crate::ZeroStylError::InvalidCommitment(
-                "Commitment requires non-empty randomness for security".to_string(),
-            ));
-        }
-        if randomness.len() < Self::MIN_RANDOMNESS_SIZE {
+    ///
+    /// Returns [`ZeroStylError::InvalidCommitment`](crate::ZeroStylError::InvalidCommitment) if:
+    /// - `siblings` and `indices` have different lengths
+    /// - Depth exceeds [`MAX_DEPTH`](Self::MAX_DEPTH)
+    /// - Path is empty
+    pub fn new(siblings: Vec<[u8; 32]>, indices: Vec<bool>) -> crate::Result<Self> {
+        if siblings.len() != indices.len() {
             return Err(crate::ZeroStylError::InvalidCommitment(format!(
-                "Randomness too short: {} bytes (minimum {})",
-                randomness.len(),
-                Self::MIN_RANDOMNESS_SIZE
+                "Merkle path length mismatch: {} siblings, {} indices",
+                siblings.len(),
+                indices.len()
             )));
         }
-        Ok(Self { value, randomness, hash_type })
+        if siblings.is_empty() {
+            return Err(crate::ZeroStylError::InvalidCommitment(
+                "Merkle path cannot be empty".to_string(),
+            ));
+        }
+        if siblings.len() > Self::MAX_DEPTH {
+            return Err(crate::ZeroStylError::InvalidCommitment(format!(
+                "Merkle tree depth {} exceeds maximum {}",
+                siblings.len(),
+                Self::MAX_DEPTH
+            )));
+        }
+        Ok(Self { siblings, indices })
     }
 
-    pub fn value(&self) -> &[u8] {
-        &self.value
+    /// Returns the tree depth (number of levels).
+    #[must_use]
+    pub fn depth(&self) -> usize {
+        self.siblings.len()
     }
 
-    pub fn randomness(&self) -> &[u8] {
-        &self.randomness
+    /// Returns the sibling hashes at each level.
+    #[must_use]
+    pub fn siblings(&self) -> &[[u8; 32]] {
+        &self.siblings
     }
 
-    pub fn hash_type(&self) -> HashType {
-        self.hash_type
+    /// Returns the path indices (false = left child, true = right child).
+    #[must_use]
+    pub fn indices(&self) -> &[bool] {
+        &self.indices
     }
 }
 
-/// Lookup tables available in circuits
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum LookupTable {
-    Sha256,
-    Pedersen,
-}
-
-/// Custom gates for specific cryptographic operations
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum CustomGate {
-    PedersenHash,
-    MerklePathGate,
-}
-
-/// Configuration for a halo2 zk-SNARK circuit
+/// Configuration for range proofs via bit decomposition.
 ///
-/// Contains all parameters needed to configure and compile a halo2 circuit.
+/// Specifies the number of bits used to constrain a value's range.
+/// A range proof with `num_bits = 64` proves that `value ∈ [0, 2^64)`.
+///
+/// # Examples
+///
+/// ```
+/// use zerostyl_runtime::RangeProofConfig;
+///
+/// let config = RangeProofConfig::new(64).unwrap();
+/// assert_eq!(config.num_bits(), 64);
+/// assert_eq!(config.max_value(), u64::MAX as u128);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RangeProofConfig {
+    num_bits: usize,
+}
+
+impl RangeProofConfig {
+    /// Maximum number of bits for a range proof (field element size limit).
+    pub const MAX_BITS: usize = 64;
+
+    /// Supported bit widths for range proofs.
+    pub const SUPPORTED_BITS: [usize; 4] = [8, 16, 32, 64];
+
+    /// Creates a new range proof configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ZeroStylError::InvalidCircuitConfig`](crate::ZeroStylError::InvalidCircuitConfig)
+    /// if `num_bits` is not one of the supported widths (8, 16, 32, 64).
+    pub fn new(num_bits: usize) -> crate::Result<Self> {
+        if !Self::SUPPORTED_BITS.contains(&num_bits) {
+            return Err(crate::ZeroStylError::InvalidCircuitConfig(format!(
+                "Unsupported range proof bit width: {}. Supported: {:?}",
+                num_bits,
+                Self::SUPPORTED_BITS
+            )));
+        }
+        Ok(Self { num_bits })
+    }
+
+    /// Returns the number of bits in this range proof.
+    #[must_use]
+    pub fn num_bits(&self) -> usize {
+        self.num_bits
+    }
+
+    /// Returns the maximum value representable: `2^num_bits - 1`.
+    #[must_use]
+    pub fn max_value(&self) -> u128 {
+        (1u128 << self.num_bits) - 1
+    }
+}
+
+/// Configuration for a halo2 zk-SNARK circuit.
+///
+/// Contains parameters needed to configure and compile a halo2 circuit.
 /// The `k` parameter determines circuit size: a circuit with `k=16` has 2^16 = 65,536 rows.
 ///
 /// # Examples
 ///
 /// ```
-/// use zerostyl_runtime::{CircuitConfig, LookupTable, CustomGate};
+/// use zerostyl_runtime::CircuitConfig;
 ///
 /// let config = CircuitConfig::minimal(16).unwrap();
 /// assert_eq!(config.k(), 16);
@@ -163,40 +283,40 @@ pub enum CustomGate {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CircuitConfig {
     k: u32,
-    lookup_tables: Vec<LookupTable>,
-    custom_gates: Vec<CustomGate>,
-    custom_params: std::collections::HashMap<String, String>,
+    num_advice_columns: usize,
+    num_instance_columns: usize,
+    num_fixed_columns: usize,
 }
 
 impl CircuitConfig {
+    /// Minimum k value (halo2 requirement).
     pub const MIN_K: u32 = 4;
+    /// Maximum k value (memory limit).
     pub const MAX_K: u32 = 28;
 
-    /// Creates a minimal configuration with no lookup tables or custom gates
+    /// Creates a minimal configuration with default column counts.
     ///
     /// # Errors
-    /// Returns error if k is outside valid range [4, 28]
+    ///
+    /// Returns error if `k` is outside valid range [4, 28].
     pub fn minimal(k: u32) -> crate::Result<Self> {
         Self::validate_k(k)?;
-        Ok(Self {
-            k,
-            lookup_tables: vec![],
-            custom_gates: vec![],
-            custom_params: std::collections::HashMap::new(),
-        })
+        Ok(Self { k, num_advice_columns: 1, num_instance_columns: 1, num_fixed_columns: 0 })
     }
 
-    /// Creates a full configuration with lookup tables and custom gates
+    /// Creates a configuration with specified column counts.
     ///
     /// # Errors
-    /// Returns error if k is outside valid range [4, 28]
+    ///
+    /// Returns error if `k` is outside valid range [4, 28].
     pub fn new(
         k: u32,
-        lookup_tables: Vec<LookupTable>,
-        custom_gates: Vec<CustomGate>,
+        num_advice_columns: usize,
+        num_instance_columns: usize,
+        num_fixed_columns: usize,
     ) -> crate::Result<Self> {
         Self::validate_k(k)?;
-        Ok(Self { k, lookup_tables, custom_gates, custom_params: std::collections::HashMap::new() })
+        Ok(Self { k, num_advice_columns, num_instance_columns, num_fixed_columns })
     }
 
     fn validate_k(k: u32) -> crate::Result<()> {
@@ -217,27 +337,33 @@ impl CircuitConfig {
         Ok(())
     }
 
+    /// Returns the k parameter.
+    #[must_use]
     pub fn k(&self) -> u32 {
         self.k
     }
 
+    /// Returns the number of rows: `2^k`.
+    #[must_use]
     pub fn num_rows(&self) -> usize {
         1 << self.k
     }
 
-    pub fn lookup_tables(&self) -> &[LookupTable] {
-        &self.lookup_tables
+    /// Returns the number of advice columns.
+    #[must_use]
+    pub fn num_advice_columns(&self) -> usize {
+        self.num_advice_columns
     }
 
-    pub fn custom_gates(&self) -> &[CustomGate] {
-        &self.custom_gates
+    /// Returns the number of instance columns.
+    #[must_use]
+    pub fn num_instance_columns(&self) -> usize {
+        self.num_instance_columns
     }
 
-    pub fn add_param(&mut self, key: String, value: String) {
-        self.custom_params.insert(key, value);
-    }
-
-    pub fn custom_params(&self) -> &std::collections::HashMap<String, String> {
-        &self.custom_params
+    /// Returns the number of fixed columns.
+    #[must_use]
+    pub fn num_fixed_columns(&self) -> usize {
+        self.num_fixed_columns
     }
 }

@@ -1,0 +1,27 @@
+[package]
+name = "zerostyl-cli"
+version = "0.1.0"
+edition = "2021"
+authors = ["kazai777 <kazai777.dev@gmail.com>"]
+license = "MIT"
+description = "CLI tools for ZeroStyl zero-knowledge proof generation and verification"
+publish = false
+
+[dependencies]
+zerostyl-compiler = { path = "../zerostyl-compiler" }
+tx_privacy = { path = "../../examples/tx_privacy" }
+state_mask = { path = "../../examples/state_mask" }
+halo2_proofs = { version = "0.3", features = ["dev-graph"] }
+halo2curves = "0.7"
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+hex = "0.4"
+
+[dev-dependencies]
+tempfile = "3.0"
+
+[[bin]]
+name = "zerostyl-prove"
+path = "src/main.rs"

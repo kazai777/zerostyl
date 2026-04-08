@@ -1,7 +1,7 @@
 //! Transaction Privacy Demo - Alice sends tokens to Bob privately
 //!
 //! This demo shows how ZeroStyl enables private transfers using
-//! zero-knowledge proofs with Pedersen commitments and Merkle proofs.
+//! zero-knowledge proofs with Poseidon hash commitments and Merkle proofs.
 //!
 //! Uses NativeProver from zerostyl-compiler for REAL cryptographic proof generation.
 
@@ -22,7 +22,8 @@ fn main() {
     let amount = 300u64;
     let randomness_old = Fp::from(42);
     let randomness_new = Fp::from(84);
-    let merkle_path: Vec<Fp> = (0..MERKLE_DEPTH).map(|i| Fp::from(i as u64)).collect();
+    let siblings: Vec<Fp> = (0..MERKLE_DEPTH).map(|i| Fp::from((i + 100) as u64)).collect();
+    let indices: Vec<bool> = (0..MERKLE_DEPTH).map(|i| i % 2 == 0).collect();
 
     println!("SECRET inputs (only Alice knows):");
     println!("  - Old balance: {} tokens", balance_old);
@@ -34,7 +35,7 @@ fn main() {
         TxPrivacyCircuit::compute_commitment(Fp::from(balance_old), randomness_old);
     let commitment_new =
         TxPrivacyCircuit::compute_commitment(Fp::from(balance_new), randomness_new);
-    let merkle_root = TxPrivacyCircuit::compute_merkle_root(commitment_old, &merkle_path);
+    let merkle_root = TxPrivacyCircuit::compute_merkle_root(commitment_old, &siblings, &indices);
 
     println!("PUBLIC outputs (what the blockchain sees):");
     println!(
@@ -56,10 +57,11 @@ fn main() {
         randomness_old,
         randomness_new,
         amount,
-        merkle_path.clone(),
+        siblings,
+        indices,
     );
 
-    let k = 10;
+    let k = 14;
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
 
     println!("ZEROSTYL-COMPILER INTEGRATION:");
@@ -76,7 +78,7 @@ fn main() {
         circuit_name: "tx_privacy".to_string(),
         k,
         num_public_inputs: 3,
-        num_private_witnesses: 38, // balance_old, balance_new, randomness_old, randomness_new, amount + merkle_path
+        num_private_witnesses: 69,
     };
 
     prover.setup(metadata).expect("Failed to setup prover");

@@ -260,8 +260,8 @@ fn test_circuit_config_k_parameter() {
     let parsed = parse_contract(input).unwrap();
     let ir = transform_to_ir(parsed).unwrap();
 
-    // Default k is 16 (2^16 = 65536 rows)
-    assert_eq!(ir.circuit_config.k(), 16);
+    // k computed dynamically: 1 u64 → (1 + 66) * 2 = 134 → k=8
+    assert_eq!(ir.circuit_config.k(), 8);
 
     assert!(validate_circuit_ir(&ir).is_ok());
 }
@@ -553,7 +553,8 @@ fn test_tx_privacy_circuit() {
         );
     }
 
-    assert_eq!(ir.circuit_config.k(), 16);
+    // 5 fields (3 u64 + 2 Bytes32): (5 + 3*66) * 2 = 406 → k=9
+    assert_eq!(ir.circuit_config.k(), 9);
 }
 
 #[test]
@@ -580,7 +581,8 @@ fn test_state_mask_circuit() {
     assert_eq!(ir.private_witnesses.len(), 4);
 
     assert!(!ir.private_witnesses[0].constraints.is_empty());
-    assert_eq!(ir.circuit_config.k(), 16);
+    // 4 fields (3 u64 + 1 Bytes32): (4 + 3*66) * 2 = 404 → k=9
+    assert_eq!(ir.circuit_config.k(), 9);
 }
 
 #[test]
@@ -677,7 +679,7 @@ fn test_circuit_validates_large_circuits() {
     let ir = transform_to_ir(parsed).unwrap();
 
     let result = validate_circuit_ir(&ir);
-    assert!(result.is_ok(), "100 fields should be valid with k=16");
+    assert!(result.is_ok(), "100 fields should be valid with dynamically computed k");
 }
 
 #[test]
@@ -935,6 +937,39 @@ fn test_with_public_inputs_success() {
     let public_inputs = vec![TestField::from(100)];
     let prover = MockProver::run(k, &circuit, vec![public_inputs]).unwrap();
     assert_eq!(prover.verify(), Ok(()));
+}
+
+#[test]
+fn test_mock_prover_nonzero_witnesses() {
+    use halo2_proofs::dev::MockProver;
+
+    let input = r#"
+        struct NonZeroTest {
+            #[zk_private]
+            balance: u64,
+            #[zk_private]
+            flag: bool,
+            #[zk_private]
+            amount: u32,
+        }
+    "#;
+
+    let parsed = parse_contract(input).unwrap();
+    let ir = transform_to_ir(parsed).unwrap();
+    let k = ir.circuit_config.k();
+
+    let circuit = CircuitBuilder::new(ir)
+        .build::<TestField>()
+        .with_witnesses(vec![
+            TestField::from(999u64),   // non-trivial u64
+            TestField::from(1u64),     // boolean = 1
+            TestField::from(12345u64), // non-trivial u32
+        ])
+        .unwrap();
+
+    // ZkCircuit always configures an instance column, so we must provide one row
+    let prover = MockProver::run(k, &circuit, vec![vec![]]).unwrap();
+    assert_eq!(prover.verify(), Ok(()), "Circuit with non-zero witnesses should verify");
 }
 
 #[test]
