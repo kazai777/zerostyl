@@ -1,5 +1,9 @@
 /target
+target/
 Cargo.lock
 **/*.rs.bk
 *.pdb
 .DS_Store
+.claude/worktrees/
+.zerostyl_cache/
+proof.bin
