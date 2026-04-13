@@ -63,8 +63,8 @@ enum Commands {
         #[arg(short, long)]
         proof: PathBuf,
 
-        /// Path to public inputs JSON file
-        #[arg(short = 'i', long)]
+        /// Path to public inputs JSON file (generated automatically by `generate`)
+        #[arg(short = 'i', long, default_value = "public_inputs.json")]
         inputs: PathBuf,
 
         /// Circuit parameter k
@@ -219,6 +219,24 @@ fn load_public_inputs(path: &PathBuf) -> Result<PublicInputsData> {
     serde_json::from_str(&content).context("Failed to parse public inputs JSON")
 }
 
+/// Serialize public inputs to JSON alongside the proof.
+///
+/// Each Fp is written as `"0x<little-endian hex>"` via `to_repr()`,
+/// which round-trips correctly through `parse_field`'s `from_repr` path.
+fn write_public_inputs(proof_output: &PathBuf, inputs: &[Vec<Fp>]) -> Result<()> {
+    use halo2curves::group::ff::PrimeField;
+    let rows: Vec<Vec<String>> = inputs
+        .iter()
+        .map(|row| row.iter().map(|fp| format!("0x{}", hex::encode(fp.to_repr()))).collect())
+        .collect();
+    let data = PublicInputsData { inputs: rows };
+    let json = serde_json::to_string_pretty(&data)?;
+    let path = proof_output.with_file_name("public_inputs.json");
+    fs::write(&path, json).context(format!("Failed to write public inputs to {:?}", path))?;
+    println!("  Public inputs  →  {:?}", path);
+    Ok(())
+}
+
 // ─── Prove functions ─────────────────────────────────────────────────────────
 
 fn prove_example(
@@ -256,9 +274,11 @@ fn prove_example(
         .collect();
 
     println!("  Generating proof...");
-    let proof = prover.generate_proof(&public_inputs?)?;
+    let pi = public_inputs?;
+    let proof = prover.generate_proof(&pi)?;
     fs::write(&output, &proof).context(format!("Failed to write proof to {:?}", output))?;
     println!("  Proof: {} bytes  →  {:?}", proof.len(), output);
+    write_public_inputs(&output, &pi)?;
     Ok(())
 }
 
@@ -299,10 +319,12 @@ fn prove_state_mask(
     })?;
 
     println!("  Generating proof...");
-    let proof = prover.generate_proof(&[vec![commitment, Fp::from(threshold)]])?;
+    let pi = vec![vec![commitment, Fp::from(threshold)]];
+    let proof = prover.generate_proof(&pi)?;
     fs::write(&output, &proof).context(format!("Failed to write proof to {:?}", output))?;
     println!("  Commitment (public input): {:?}", commitment);
     println!("  Proof: {} bytes  →  {:?}", proof.len(), output);
+    write_public_inputs(&output, &pi)?;
     Ok(())
 }
 
@@ -372,13 +394,15 @@ fn prove_tx_privacy(
     })?;
 
     println!("  Generating proof...");
-    let proof = prover.generate_proof(&[vec![commitment_old, commitment_new, merkle_root]])?;
+    let pi = vec![vec![commitment_old, commitment_new, merkle_root]];
+    let proof = prover.generate_proof(&pi)?;
     fs::write(&output, &proof).context(format!("Failed to write proof to {:?}", output))?;
     println!(
         "  Public inputs: commitment_old={:?}  commitment_new={:?}  merkle_root={:?}",
         commitment_old, commitment_new, merkle_root
     );
     println!("  Proof: {} bytes  →  {:?}", proof.len(), output);
+    write_public_inputs(&output, &pi)?;
     Ok(())
 }
 
@@ -420,14 +444,15 @@ fn prove_private_vote(
     })?;
 
     println!("  Generating proof...");
-    let proof =
-        prover.generate_proof(&[vec![balance_commitment, Fp::from(threshold), vote_commitment]])?;
+    let pi = vec![vec![balance_commitment, Fp::from(threshold), vote_commitment]];
+    let proof = prover.generate_proof(&pi)?;
     fs::write(&output, &proof).context(format!("Failed to write proof to {:?}", output))?;
     println!(
         "  Public inputs: balance_commitment={:?}  threshold={}  vote_commitment={:?}",
         balance_commitment, threshold, vote_commitment
     );
     println!("  Proof: {} bytes  →  {:?}", proof.len(), output);
+    write_public_inputs(&output, &pi)?;
     Ok(())
 }
 
