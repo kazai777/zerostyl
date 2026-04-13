@@ -180,7 +180,16 @@ impl std::fmt::Display for DebugReport {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "=== Debug Report: {} ===", self.circuit_name)?;
         writeln!(f)?;
-        write!(f, "{}", self.stats)?;
+        // Compact one-liner — full constraint list is available via `inspect`
+        writeln!(
+            f,
+            "Circuit: {}  k={}  Columns: {}  Gates: {}  Constraints: {}",
+            self.stats.name,
+            self.stats.k,
+            self.stats.total_columns(),
+            self.stats.num_gates,
+            self.stats.num_constraints,
+        )?;
         writeln!(f)?;
         if self.is_satisfied {
             writeln!(f, "Result: ALL CONSTRAINTS SATISFIED")?;

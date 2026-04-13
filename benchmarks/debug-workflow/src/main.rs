@@ -273,7 +273,7 @@ fn scenario_b() -> (ScenarioResult, String, String) {
         "B",
         "tx_privacy",
         "amount=300 but balance_old-balance_new=200",
-        "balance_check",
+        "balance check",
         &raw_output,
         &zerostyl_output,
     );

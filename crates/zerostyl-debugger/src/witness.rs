@@ -34,7 +34,9 @@ pub fn debug_circuit<C: Circuit<Fp>>(
             stats,
         }),
         Err(failures) => {
-            let constraint_failures = failures.iter().map(convert_verify_failure).collect();
+            let raw_failures: Vec<ConstraintFailure> =
+                failures.iter().map(convert_verify_failure).collect();
+            let constraint_failures = annotate_permutation_failures(raw_failures, name);
 
             Ok(DebugReport {
                 circuit_name: name.to_string(),
@@ -65,8 +67,10 @@ fn convert_verify_failure(failure: &VerifyFailure) -> ConstraintFailure {
                     WitnessInfo { column: col_info, row: cell_row, value: Some(val.clone()) }
                 })
                 .collect();
+            // Build a clean hint without repeating cell values (they are shown separately)
+            let clean_hint = format!("{} is not satisfied in {}", constraint_str, location);
 
-            ConstraintFailure { gate_name, row, expression_index, cell_values: cells, hint }
+            ConstraintFailure { gate_name, row, expression_index, cell_values: cells, hint: clean_hint }
         }
         VerifyFailure::CellNotAssigned { gate, gate_offset, column, .. } => {
             let gate_str = format!("{}", gate);
@@ -126,12 +130,36 @@ fn convert_verify_failure(failure: &VerifyFailure) -> ConstraintFailure {
             let row = extract_row_from_location(location);
             let col_str = format!("{}", column);
 
+            // Parse column type and index from Display: "Column('Advice', 0)"
+            let col_type = if col_str.contains("'Advice'") {
+                ColumnType::Advice
+            } else if col_str.contains("'Instance'") {
+                ColumnType::Instance
+            } else {
+                ColumnType::Fixed
+            };
+            let col_index = col_str
+                .find(", ")
+                .and_then(|start| {
+                    let after = &col_str[start + 2..];
+                    after.find(')').and_then(|end| after[..end].parse::<usize>().ok())
+                })
+                .unwrap_or(0);
+
+            let location_str = format!("{}", location);
             ConstraintFailure {
-                gate_name: format!("permutation({})", col_str),
+                gate_name: format!("copy-constraint: {}[{}]", col_type, col_index),
                 row,
                 expression_index: 0,
-                cell_values: vec![],
-                hint,
+                cell_values: vec![WitnessInfo {
+                    column: ColumnInfo { column_type: col_type.clone(), index: col_index },
+                    row,
+                    value: None,
+                }],
+                hint: format!(
+                    "{}[{}] at row {} does not equal its copy-constrained cell ({})",
+                    col_type, col_index, row, location_str
+                ),
             }
         }
     }
@@ -231,6 +259,68 @@ fn convert_any_column_type(any: &halo2_proofs::plonk::Any) -> ColumnType {
         halo2_proofs::plonk::Any::Advice => ColumnType::Advice,
         halo2_proofs::plonk::Any::Fixed => ColumnType::Fixed,
         halo2_proofs::plonk::Any::Instance => ColumnType::Instance,
+    }
+}
+
+// ─── Semantic annotation ───────────────────────────────────────────────────
+
+/// Replace generic "copy-constraint: col[n]" gate names with semantic names
+/// for known ZeroStyl circuits. Non-ZeroStyl circuits keep the default name.
+fn annotate_permutation_failures(
+    mut failures: Vec<ConstraintFailure>,
+    circuit_name: &str,
+) -> Vec<ConstraintFailure> {
+    for failure in &mut failures {
+        if failure.gate_name.starts_with("copy-constraint:") {
+            if let Some(semantic) = semantic_gate_name(circuit_name, failure) {
+                failure.gate_name = semantic;
+            }
+        }
+    }
+    failures
+}
+
+/// Derive the semantic gate name for a permutation failure.
+///
+/// First tries to match by instance column position (public input semantics),
+/// then falls back to the region name embedded in the hint.
+fn semantic_gate_name(circuit: &str, failure: &ConstraintFailure) -> Option<String> {
+    // Instance column → public input semantic name
+    for cell in &failure.cell_values {
+        if cell.column.column_type == ColumnType::Instance {
+            if let Some(name) = instance_gate_name(circuit, cell.column.index, cell.row) {
+                return Some(name.to_string());
+            }
+        }
+    }
+    // Advice-only permutation → derive from region name in the hint
+    region_gate_name(circuit, &failure.hint)
+}
+
+/// Map (circuit, instance column index, row) → public input name.
+fn instance_gate_name(circuit: &str, col: usize, row: usize) -> Option<&'static str> {
+    match (circuit, col, row) {
+        ("state_mask", 0, 0) => Some("commitment"),
+        ("state_mask", 0, 1) => Some("threshold"),
+        ("tx_privacy", 0, 0) => Some("commitment_old"),
+        ("tx_privacy", 0, 1) => Some("commitment_new"),
+        ("tx_privacy", 0, 2) => Some("merkle_root"),
+        ("private_vote", 0, 0) => Some("balance_commitment"),
+        ("private_vote", 0, 1) => Some("threshold"),
+        ("private_vote", 0, 2) => Some("vote_commitment"),
+        _ => None,
+    }
+}
+
+/// Map circuit + region name (from the hint string) → semantic gate name.
+fn region_gate_name(circuit: &str, hint: &str) -> Option<String> {
+    match circuit {
+        "state_mask" if hint.contains("permute state") => Some("commitment".to_string()),
+        "private_vote" if hint.contains("range check 1 bits") => {
+            Some("vote_boolean".to_string())
+        }
+        "private_vote" if hint.contains("range check") => Some("balance_range".to_string()),
+        _ => None,
     }
 }
 
