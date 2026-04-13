@@ -70,7 +70,13 @@ fn convert_verify_failure(failure: &VerifyFailure) -> ConstraintFailure {
             // Build a clean hint without repeating cell values (they are shown separately)
             let clean_hint = format!("{} is not satisfied in {}", constraint_str, location);
 
-            ConstraintFailure { gate_name, row, expression_index, cell_values: cells, hint: clean_hint }
+            ConstraintFailure {
+                gate_name,
+                row,
+                expression_index,
+                cell_values: cells,
+                hint: clean_hint,
+            }
         }
         VerifyFailure::CellNotAssigned { gate, gate_offset, column, .. } => {
             let gate_str = format!("{}", gate);
@@ -316,9 +322,7 @@ fn instance_gate_name(circuit: &str, col: usize, row: usize) -> Option<&'static 
 fn region_gate_name(circuit: &str, hint: &str) -> Option<String> {
     match circuit {
         "state_mask" if hint.contains("permute state") => Some("commitment".to_string()),
-        "private_vote" if hint.contains("range check 1 bits") => {
-            Some("vote_boolean".to_string())
-        }
+        "private_vote" if hint.contains("range check 1 bits") => Some("vote_boolean".to_string()),
         "private_vote" if hint.contains("range check") => Some("balance_range".to_string()),
         _ => None,
     }
