@@ -223,7 +223,7 @@ fn load_public_inputs(path: &PathBuf) -> Result<PublicInputsData> {
 ///
 /// Each Fp is written as `"0x<little-endian hex>"` via `to_repr()`,
 /// which round-trips correctly through `parse_field`'s `from_repr` path.
-fn write_public_inputs(proof_output: &PathBuf, inputs: &[Vec<Fp>]) -> Result<()> {
+fn write_public_inputs(proof_output: &std::path::Path, inputs: &[Vec<Fp>]) -> Result<()> {
     use halo2curves::group::ff::PrimeField;
     let rows: Vec<Vec<String>> = inputs
         .iter()
