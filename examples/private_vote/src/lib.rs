@@ -96,8 +96,6 @@ impl PrivateVoteCircuit {
         }
     }
 
-    /// Compute a Poseidon commitment: commitment = Poseidon(value, randomness).
-    ///
     /// Constructs a circuit without validating inputs — for use in the debugger only.
     pub fn from_raw(
         balance: u64,

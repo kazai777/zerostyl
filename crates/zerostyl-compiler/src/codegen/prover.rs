@@ -36,7 +36,7 @@ pub struct NativeProver<C: Circuit<Fp>> {
 
 impl<C: Circuit<Fp> + Clone> NativeProver<C> {
     /// Create a new prover with default cache directory (`.zerostyl_cache`).
-    pub fn new(circuit: C, _circuit_name: String, k: u32) -> Result<Self> {
+    pub fn new(circuit: C, k: u32) -> Result<Self> {
         let cache_dir = std::env::current_dir()?.join(".zerostyl_cache");
         let key_manager = KeyManager::new(&cache_dir)?;
 
@@ -382,7 +382,7 @@ mod tests {
     #[test]
     fn test_prover_new() {
         let circuit = SimpleCircuit { a: Value::known(Fp::from(2)), b: Value::known(Fp::from(3)) };
-        let prover = NativeProver::new(circuit, "test".to_string(), 4).unwrap();
+        let prover = NativeProver::new(circuit, 4).unwrap();
         assert!(prover.proving_key().is_none());
         assert!(prover.verifying_key().is_none());
     }

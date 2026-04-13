@@ -249,7 +249,7 @@ fn circuit_hint(circuit_name: &str, gate_name: &str) -> Option<&'static str> {
         }
         ("state_mask" | "private_vote", "bit_decompose") => Some(
             "the bit decomposition accumulation is inconsistent — \
-             verify bits correctly encode (value - range_min)",
+             verify the bit encoding of the range-checked value is correct",
         ),
         ("tx_privacy", "balance_check") => Some(
             "balance_old - amount must equal balance_new — \

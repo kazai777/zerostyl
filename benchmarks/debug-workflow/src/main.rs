@@ -203,18 +203,17 @@ fn pct_change(before: usize, after: usize) -> String {
 fn scenario_a() -> (ScenarioResult, String, String) {
     let value = 42u64;
     let randomness = Fp::from(123u64);
-    let commitment_override = Fp::from(999u64); // correct: 42+123=165
+    let wrong_commitment = Fp::from(999u64);
+    let threshold = 100u64;
     let k = 10u32;
-    let pi = vec![vec![commitment_override]];
+    let pi = vec![vec![wrong_commitment, Fp::from(threshold)]];
 
-    let circuit_raw =
-        black_box(StateMaskCircuit::from_raw(value, randomness, 0, 255, Some(commitment_override)));
+    let circuit_raw = black_box(StateMaskCircuit::from_raw(value, randomness, 200, 500, threshold));
     let prover = MockProver::run(k, &circuit_raw, pi.clone()).expect("MockProver::run failed");
     let raw_errors = prover.verify().expect_err("expected failure");
     let raw_output = format!("{:#?}", raw_errors);
 
-    let circuit_z =
-        black_box(StateMaskCircuit::from_raw(value, randomness, 0, 255, Some(commitment_override)));
+    let circuit_z = black_box(StateMaskCircuit::from_raw(value, randomness, 200, 500, threshold));
     let report = debug_circuit(&circuit_z, pi, k, "state_mask").expect("debug_circuit failed");
     let zerostyl_output = format!("{}", report);
 
@@ -239,9 +238,10 @@ fn scenario_b() -> (ScenarioResult, String, String) {
     let path = vec![Fp::ZERO; MERKLE_DEPTH];
     let k = 14u32;
 
+    let indices = vec![false; MERKLE_DEPTH];
     let comm_old = TxPrivacyCircuit::compute_commitment(Fp::from(balance_old), r_old);
     let comm_new = TxPrivacyCircuit::compute_commitment(Fp::from(balance_new), r_new);
-    let root = TxPrivacyCircuit::compute_merkle_root(comm_old, &path);
+    let root = TxPrivacyCircuit::compute_merkle_root(comm_old, &path, &indices);
     let pi = vec![vec![comm_old, comm_new, root]];
 
     let circuit_raw = black_box(TxPrivacyCircuit::from_raw(
@@ -251,8 +251,7 @@ fn scenario_b() -> (ScenarioResult, String, String) {
         r_new,
         amount,
         path.clone(),
-        None,
-        None,
+        indices.clone(),
     ));
     let prover = MockProver::run(k, &circuit_raw, pi.clone()).expect("MockProver::run failed");
     let raw_errors = prover.verify().expect_err("expected failure");
@@ -265,8 +264,7 @@ fn scenario_b() -> (ScenarioResult, String, String) {
         r_new,
         amount,
         path,
-        None,
-        None,
+        indices,
     ));
     let report = debug_circuit(&circuit_z, pi, k, "tx_privacy").expect("debug_circuit failed");
     let zerostyl_output = format!("{}", report);
@@ -295,16 +293,14 @@ fn scenario_c() -> (ScenarioResult, String, String) {
     let vote_commit = PrivateVoteCircuit::compute_commitment(Fp::from(vote), r_vote);
     let pi = vec![vec![bal_commit, Fp::from(threshold), vote_commit]];
 
-    let circuit_raw = black_box(PrivateVoteCircuit::from_raw(
-        balance, r_bal, vote, r_vote, threshold, None, None,
-    ));
+    let circuit_raw =
+        black_box(PrivateVoteCircuit::from_raw(balance, r_bal, vote, r_vote, threshold));
     let prover = MockProver::run(k, &circuit_raw, pi.clone()).expect("MockProver::run failed");
     let raw_errors = prover.verify().expect_err("expected failure");
     let raw_output = format!("{:#?}", raw_errors);
 
-    let circuit_z = black_box(PrivateVoteCircuit::from_raw(
-        balance, r_bal, vote, r_vote, threshold, None, None,
-    ));
+    let circuit_z =
+        black_box(PrivateVoteCircuit::from_raw(balance, r_bal, vote, r_vote, threshold));
     let report = debug_circuit(&circuit_z, pi, k, "private_vote").expect("debug_circuit failed");
     let zerostyl_output = format!("{}", report);
 
