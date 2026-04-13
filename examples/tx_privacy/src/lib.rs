@@ -127,6 +127,30 @@ impl TxPrivacyCircuit {
         }
     }
 
+    /// Constructs a circuit without validating inputs — for use in the debugger only.
+    pub fn from_raw(
+        balance_old: u64,
+        balance_new: u64,
+        randomness_old: Fp,
+        randomness_new: Fp,
+        amount: u64,
+        merkle_siblings: Vec<Fp>,
+        merkle_indices: Vec<bool>,
+    ) -> Self {
+        Self {
+            balance_old: Value::known(Fp::from(balance_old)),
+            balance_new: Value::known(Fp::from(balance_new)),
+            randomness_old: Value::known(randomness_old),
+            randomness_new: Value::known(randomness_new),
+            amount: Value::known(Fp::from(amount)),
+            merkle_siblings: merkle_siblings.iter().map(|&s| Value::known(s)).collect(),
+            merkle_indices: merkle_indices
+                .iter()
+                .map(|&i| Value::known(Fp::from(i as u64)))
+                .collect(),
+        }
+    }
+
     /// Computes a Poseidon commitment: `Poseidon(balance, randomness)`.
     #[must_use]
     pub fn compute_commitment(balance: Fp, randomness: Fp) -> Fp {

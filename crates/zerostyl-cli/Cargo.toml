@@ -4,20 +4,23 @@ version = "0.1.0"
 edition = "2021"
 authors = ["kazai777 <kazai777.dev@gmail.com>"]
 license = "MIT"
-description = "CLI tools for ZeroStyl zero-knowledge proof generation and verification"
-publish = false
+description = "CLI tools for ZeroStyl — proof generation and verification for halo2 circuits"
+repository = "https://github.com/kazai777/zerostyl"
+keywords = ["arbitrum", "stylus", "zero-knowledge", "privacy", "zk-snarks"]
+categories = ["cryptography", "development-tools"]
 
 [dependencies]
 zerostyl-compiler = { path = "../zerostyl-compiler" }
-tx_privacy = { path = "../../examples/tx_privacy" }
 state_mask = { path = "../../examples/state_mask" }
-halo2_proofs = { version = "0.3", features = ["dev-graph"] }
+tx_privacy = { path = "../../examples/tx_privacy" }
+private_vote = { path = "../../examples/private_vote" }
+halo2_proofs = { version = "0.3" }
 halo2curves = "0.7"
 anyhow = "1.0"
 clap = { version = "4.5", features = ["derive"] }
+hex = "0.4"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-hex = "0.4"
 
 [dev-dependencies]
 tempfile = "3.0"

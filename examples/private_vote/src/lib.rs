@@ -96,8 +96,23 @@ impl PrivateVoteCircuit {
         }
     }
 
-    /// Compute a Poseidon commitment: commitment = Poseidon(value, randomness).
-    ///
+    /// Constructs a circuit without validating inputs — for use in the debugger only.
+    pub fn from_raw(
+        balance: u64,
+        randomness_balance: Fp,
+        vote: u64,
+        randomness_vote: Fp,
+        threshold: u64,
+    ) -> Self {
+        Self {
+            balance: Value::known(Fp::from(balance)),
+            randomness_balance: Value::known(randomness_balance),
+            vote: Value::known(Fp::from(vote)),
+            randomness_vote: Value::known(randomness_vote),
+            threshold,
+        }
+    }
+
     /// Uses the P128Pow5T3 specification (128-bit security, width=3, rate=2)
     /// matching halo2_gadgets Poseidon. This provides both hiding and binding
     /// security properties.

@@ -10,6 +10,11 @@ members = [
     "examples/tx_privacy",
     "examples/state_mask",
     "examples/private_vote",
+    "benchmarks/debug-workflow",
+]
+
+exclude = [
+    "contracts/tx_privacy_verifier",
 ]
 
 [workspace.package]

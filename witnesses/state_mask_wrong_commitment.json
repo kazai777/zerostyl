@@ -1,0 +1,10 @@
+{
+  "state_value": "42",
+  "nonce": "123",
+  "collateral_ratio": "200",
+  "hidden_balance": "500",
+  "threshold": "100",
+  "_debug": {
+    "commitment": "999"
+  }
+}

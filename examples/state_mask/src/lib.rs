@@ -117,6 +117,26 @@ impl StateMaskCircuit {
         }
     }
 
+    /// Constructs a circuit without validating inputs — for use in the debugger only.
+    ///
+    /// Allows injecting invalid or edge-case witnesses so the MockProver can surface
+    /// the exact failing constraint.
+    pub fn from_raw(
+        state_value: u64,
+        nonce: Fp,
+        collateral_ratio: u64,
+        hidden_balance: u64,
+        threshold: u64,
+    ) -> Self {
+        Self {
+            state_value: Value::known(Fp::from(state_value)),
+            nonce: Value::known(nonce),
+            collateral_ratio: Value::known(Fp::from(collateral_ratio)),
+            hidden_balance: Value::known(Fp::from(hidden_balance)),
+            threshold: Value::known(Fp::from(threshold)),
+        }
+    }
+
     /// Computes `Poseidon(state_value, nonce)` outside the circuit.
     ///
     /// Used for witness generation and public input computation.
