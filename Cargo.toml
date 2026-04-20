@@ -15,6 +15,10 @@ members = [
 
 exclude = [
     "contracts/tx_privacy_verifier",
+    "contracts/private_lending_pool",
+    "contracts/state_mask_verifier",
+    "contracts/private_vote_verifier",
+    "contracts/private_swap_verifier",
 ]
 
 [workspace.package]
