@@ -9,7 +9,7 @@ use std::{fs, path::PathBuf};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use zerostyl_circuits::{FieldType, FieldVisibility, Registry, WitnessSchema};
+use zerostyl_circuits::{register_circuit, FieldType, FieldVisibility, Registry, WitnessSchema};
 use zerostyl_debugger::{format_introspection, format_mock_prover_report, OutputFormat};
 
 #[derive(Parser)]
@@ -58,14 +58,10 @@ enum Commands {
 
 fn main() -> Result<()> {
     let registry = Registry::new();
-    for d in [
-        example_demo::descriptor(),
-        state_mask::descriptor(),
-        tx_privacy::descriptor(),
-        private_vote::descriptor(),
-    ] {
-        registry.register(d).map_err(|e| anyhow::anyhow!("{e}"))?;
-    }
+    register_circuit!(registry, example_demo)?;
+    register_circuit!(registry, state_mask)?;
+    register_circuit!(registry, tx_privacy)?;
+    register_circuit!(registry, private_vote)?;
 
     let cli = Cli::parse();
     match cli.command {
@@ -144,7 +140,11 @@ fn cmd_witness(
     println!("Expected schema:");
     print_witness_schema(desc.witness_schema());
     println!();
-    println!("(Run `zerostyl-debug debug --circuit {} --witnesses {}` to validate", desc.name(), witnesses_path.display());
+    println!(
+        "(Run `zerostyl-debug debug --circuit {} --witnesses {}` to validate",
+        desc.name(),
+        witnesses_path.display()
+    );
     println!(" against the constraint system.)");
     Ok(())
 }

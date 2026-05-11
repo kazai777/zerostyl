@@ -1,15 +1,11 @@
 use anyhow::Result;
-use zerostyl_circuits::Registry;
+use zerostyl_circuits::{register_circuit, Registry};
 
 fn main() -> Result<()> {
     let registry = Registry::new();
-    for d in [
-        example_demo::descriptor(),
-        state_mask::descriptor(),
-        tx_privacy::descriptor(),
-        private_vote::descriptor(),
-    ] {
-        registry.register(d).map_err(|e| anyhow::anyhow!("{e}"))?;
-    }
+    register_circuit!(registry, example_demo)?;
+    register_circuit!(registry, state_mask)?;
+    register_circuit!(registry, tx_privacy)?;
+    register_circuit!(registry, private_vote)?;
     zerostyl_cli::run(&registry)
 }

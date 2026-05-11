@@ -7,6 +7,7 @@
 pub mod abi;
 pub mod descriptor;
 pub mod error;
+pub mod macros;
 pub mod proof;
 pub mod registry;
 pub mod report;
