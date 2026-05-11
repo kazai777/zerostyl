@@ -132,6 +132,12 @@ cargo fmt --all
 
 ---
 
+## Adding your own circuit
+
+ZeroStyl is plug-in by design: implement the `CircuitDescriptor` trait, register it with one line, and the CLI, debugger, and (soon) ABI exporter all pick it up automatically. See [docs/EXTENDING.md](docs/EXTENDING.md) for the five-step recipe and [`examples/example_demo/`](examples/example_demo/) for the minimal template.
+
+---
+
 ## Contributing
 
 Contributions are welcome. See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) before opening a pull request.
