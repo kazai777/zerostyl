@@ -6,6 +6,7 @@ publish = false
 description = "Output quality comparison: raw halo2 vs ZeroStyl on real broken witnesses"
 
 [dependencies]
+zerostyl-circuits = { path = "../../crates/zerostyl-circuits" }
 zerostyl-debugger = { path = "../../crates/zerostyl-debugger" }
 state_mask        = { path = "../../examples/state_mask" }
 tx_privacy        = { path = "../../examples/tx_privacy" }
