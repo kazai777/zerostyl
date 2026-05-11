@@ -24,6 +24,10 @@
 //! - Balance threshold proofs (prove solvency without revealing balance)
 //! - General privacy-preserving state attestation
 
+pub mod descriptor;
+
+pub use descriptor::descriptor;
+
 use halo2_proofs::{
     circuit::{Layouter, SimpleFloorPlanner, Value},
     plonk::{Circuit, Column, ConstraintSystem, Error, Instance},
