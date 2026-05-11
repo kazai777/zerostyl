@@ -4,11 +4,8 @@
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use halo2_proofs::{
-    circuit::{Layouter, SimpleFloorPlanner, Value},
-    plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Instance, Selector},
-    poly::Rotation,
-};
+use example_demo::ExampleCircuit;
+use halo2_proofs::{circuit::Value, plonk::Circuit};
 use halo2curves::pasta::Fp;
 use private_vote::PrivateVoteCircuit;
 use serde::{Deserialize, Serialize};
@@ -90,67 +87,6 @@ fn default_k(circuit_name: &str) -> u32 {
         "state_mask" => 10,
         "private_vote" => 11,
         _ => 10,
-    }
-}
-
-// ─── Example circuit (a + b = sum) ──────────────────────────────────────────
-
-#[derive(Clone, Debug)]
-struct ExampleCircuit {
-    a: Value<Fp>,
-    b: Value<Fp>,
-}
-
-#[derive(Clone, Debug)]
-#[allow(dead_code)]
-struct ExampleConfig {
-    advice: Column<Advice>,
-    instance: Column<Instance>,
-    selector: Selector,
-}
-
-impl Circuit<Fp> for ExampleCircuit {
-    type Config = ExampleConfig;
-    type FloorPlanner = SimpleFloorPlanner;
-
-    fn without_witnesses(&self) -> Self {
-        Self { a: Value::unknown(), b: Value::unknown() }
-    }
-
-    fn configure(meta: &mut ConstraintSystem<Fp>) -> Self::Config {
-        let advice = meta.advice_column();
-        let instance = meta.instance_column();
-        let selector = meta.selector();
-
-        meta.enable_equality(advice);
-        meta.enable_equality(instance);
-
-        meta.create_gate("add", |meta| {
-            let s = meta.query_selector(selector);
-            let a = meta.query_advice(advice, Rotation::cur());
-            let b = meta.query_advice(advice, Rotation::next());
-            let sum = meta.query_instance(instance, Rotation::cur());
-
-            vec![s * (a + b - sum)]
-        });
-
-        ExampleConfig { advice, instance, selector }
-    }
-
-    fn synthesize(
-        &self,
-        config: Self::Config,
-        mut layouter: impl Layouter<Fp>,
-    ) -> Result<(), Error> {
-        layouter.assign_region(
-            || "add",
-            |mut region| {
-                config.selector.enable(&mut region, 0)?;
-                region.assign_advice(|| "a", config.advice, 0, || self.a)?;
-                region.assign_advice(|| "b", config.advice, 1, || self.b)?;
-                Ok(())
-            },
-        )
     }
 }
 

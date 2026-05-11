@@ -1,0 +1,20 @@
+[package]
+name = "example_demo"
+version = "0.1.0"
+edition = "2021"
+authors = ["kazai777 <kazai777.dev@gmail.com>"]
+license = "MIT"
+description = "Minimal halo2 circuit (a + b = sum) demonstrating the ZeroStyl descriptor pattern"
+publish = false
+
+[dependencies]
+zerostyl-circuits = { path = "../../crates/zerostyl-circuits" }
+zerostyl-compiler = { path = "../../crates/zerostyl-compiler" }
+halo2_proofs = "0.3"
+halo2curves = "0.7"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+hex = "0.4"
+
+[dev-dependencies]
+tempfile = "3.0"
