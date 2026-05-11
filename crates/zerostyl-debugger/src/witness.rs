@@ -21,12 +21,13 @@ impl OutputFormat {
     }
 }
 
-pub fn format_mock_prover_report(report: &MockProverReport, format: OutputFormat) -> Result<String> {
+pub fn format_mock_prover_report(
+    report: &MockProverReport,
+    format: OutputFormat,
+) -> Result<String> {
     match format {
-        OutputFormat::Json => {
-            Ok(serde_json::to_string_pretty(report)
-                .map_err(|e| anyhow::anyhow!("serializing report: {e}"))?)
-        }
+        OutputFormat::Json => Ok(serde_json::to_string_pretty(report)
+            .map_err(|e| anyhow::anyhow!("serializing report: {e}"))?),
         OutputFormat::Text => Ok(render_text(report)),
     }
 }
@@ -81,12 +82,7 @@ mod tests {
     use zerostyl_circuits::FailureEntry;
 
     fn satisfied() -> MockProverReport {
-        MockProverReport {
-            circuit_name: "demo".into(),
-            k: 4,
-            satisfied: true,
-            failures: vec![],
-        }
+        MockProverReport { circuit_name: "demo".into(), k: 4, satisfied: true, failures: vec![] }
     }
 
     fn one_failure() -> MockProverReport {

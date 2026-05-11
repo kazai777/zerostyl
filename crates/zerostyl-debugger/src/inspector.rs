@@ -72,11 +72,8 @@ mod tests {
 
     #[test]
     fn renders_gates_when_present() {
-        let intro = make_intro(vec![GateInfo {
-            name: "add".into(),
-            constraint_count: 1,
-            max_degree: 2,
-        }]);
+        let intro =
+            make_intro(vec![GateInfo { name: "add".into(), constraint_count: 1, max_degree: 2 }]);
         let s = format_introspection(&intro);
         assert!(s.contains("Gates: 1"));
         assert!(s.contains("- add (1 constraint(s), max degree 2)"));

@@ -329,8 +329,7 @@ fn scenario_c() -> (ScenarioResult, String, String) {
         "threshold": "50"
     })
     .to_string();
-    let zerostyl_output =
-        zerostyl_output_via_descriptor(private_vote::descriptor(), &witness, k);
+    let zerostyl_output = zerostyl_output_via_descriptor(private_vote::descriptor(), &witness, k);
 
     let result = ScenarioResult::new(
         "C",
