@@ -1,0 +1,71 @@
+{
+  "public_inputs_schema": {
+    "fields": [
+      {
+        "description": "Poseidon(balance, randomness_balance).",
+        "kind": {
+          "type": "fp"
+        },
+        "name": "balance_commitment"
+      },
+      {
+        "description": "Public eligibility threshold.",
+        "kind": {
+          "type": "fp"
+        },
+        "name": "threshold"
+      },
+      {
+        "description": "Poseidon(vote, randomness_vote).",
+        "kind": {
+          "type": "fp"
+        },
+        "name": "vote_commitment"
+      }
+    ]
+  },
+  "witness_schema": {
+    "fields": [
+      {
+        "description": "Voter's token balance.",
+        "kind": {
+          "type": "u64"
+        },
+        "name": "balance",
+        "visibility": "private"
+      },
+      {
+        "description": "Commitment randomness for balance.",
+        "kind": {
+          "type": "fp"
+        },
+        "name": "randomness_balance",
+        "visibility": "private"
+      },
+      {
+        "description": "Boolean vote value (0 or 1).",
+        "kind": {
+          "type": "u64"
+        },
+        "name": "vote",
+        "visibility": "private"
+      },
+      {
+        "description": "Commitment randomness for vote.",
+        "kind": {
+          "type": "fp"
+        },
+        "name": "randomness_vote",
+        "visibility": "private"
+      },
+      {
+        "description": "Public minimum balance required to vote.",
+        "kind": {
+          "type": "u64"
+        },
+        "name": "threshold",
+        "visibility": "public"
+      }
+    ]
+  }
+}

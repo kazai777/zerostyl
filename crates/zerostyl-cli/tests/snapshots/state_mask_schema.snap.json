@@ -1,0 +1,64 @@
+{
+  "public_inputs_schema": {
+    "fields": [
+      {
+        "description": "Poseidon(state_value, nonce)",
+        "kind": {
+          "type": "fp"
+        },
+        "name": "commitment"
+      },
+      {
+        "description": "Public threshold mirrored from witness.",
+        "kind": {
+          "type": "fp"
+        },
+        "name": "threshold"
+      }
+    ]
+  },
+  "witness_schema": {
+    "fields": [
+      {
+        "description": "Secret value committed via Poseidon hash.",
+        "kind": {
+          "type": "u64"
+        },
+        "name": "state_value",
+        "visibility": "private"
+      },
+      {
+        "description": "Commitment randomness (Poseidon input)",
+        "kind": {
+          "type": "fp"
+        },
+        "name": "nonce",
+        "visibility": "private"
+      },
+      {
+        "description": "Must lie in [150, 300].",
+        "kind": {
+          "type": "u64"
+        },
+        "name": "collateral_ratio",
+        "visibility": "private"
+      },
+      {
+        "description": "Must be strictly greater than `threshold`.",
+        "kind": {
+          "type": "u64"
+        },
+        "name": "hidden_balance",
+        "visibility": "private"
+      },
+      {
+        "description": "Public minimum balance.",
+        "kind": {
+          "type": "u64"
+        },
+        "name": "threshold",
+        "visibility": "public"
+      }
+    ]
+  }
+}

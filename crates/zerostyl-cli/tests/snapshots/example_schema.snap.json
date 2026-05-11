@@ -1,0 +1,33 @@
+{
+  "public_inputs_schema": {
+    "fields": [
+      {
+        "description": "a + b expressed as a field element.",
+        "kind": {
+          "type": "fp"
+        },
+        "name": "sum"
+      }
+    ]
+  },
+  "witness_schema": {
+    "fields": [
+      {
+        "description": "First addend.",
+        "kind": {
+          "type": "u64"
+        },
+        "name": "a",
+        "visibility": "private"
+      },
+      {
+        "description": "Second addend.",
+        "kind": {
+          "type": "u64"
+        },
+        "name": "b",
+        "visibility": "private"
+      }
+    ]
+  }
+}
