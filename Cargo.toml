@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/zerostyl-circuits",
     "crates/zerostyl-compiler",
     "crates/zerostyl-cli",
     "crates/zerostyl-debugger",
