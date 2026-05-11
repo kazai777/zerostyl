@@ -7,6 +7,7 @@ license = "MIT"
 publish = false
 
 [dependencies]
+zerostyl-circuits = { path = "../../crates/zerostyl-circuits" }
 zerostyl-compiler = { path = "../../crates/zerostyl-compiler" }
 zerostyl-runtime = { path = "../../crates/zerostyl-runtime" }
 halo2_proofs = { version = "0.3", features = ["dev-graph"] }
@@ -16,11 +17,12 @@ ff = "0.13"
 group = "0.13"
 rand = "0.8"
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+hex = "0.4"
 
 [dev-dependencies]
 criterion = "0.5"
 tempfile = "3.0"
-hex = "0.4"
 
 [[bench]]
 name = "circuit_bench"
