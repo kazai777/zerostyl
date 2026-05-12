@@ -1,5 +1,5 @@
 use quote::ToTokens;
-use syn::{Attribute, FnArg, ItemFn, Lit};
+use syn::{Attribute, Expr, ExprBinary, ExprCall, ExprRange, FnArg, ItemFn, Lit, RangeLimits};
 
 use crate::error::{ExporterError, Result};
 
@@ -13,14 +13,36 @@ pub struct ZkPrivateAttr {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AttrSpec {
     Commit(CommitScheme),
-    Range(String),
-    Constraint(String),
-    MerkleMember(String),
+    Range(RangeSpec),
+    Constraint(Constraint),
+    MerkleMember(MerkleMemberSpec),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommitScheme {
     Poseidon,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RangeSpec {
+    pub low: String,
+    pub high: String,
+    pub inclusive: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Constraint {
+    Gte(String),
+    Gt(String),
+    Lte(String),
+    Lt(String),
+    Eq(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MerkleMemberSpec {
+    pub root_var: String,
+    pub siblings_var: String,
 }
 
 pub fn parse_fn(item_fn: &ItemFn) -> Result<Vec<ZkPrivateAttr>> {
@@ -77,12 +99,19 @@ fn parse_zk_private_attrs(attrs: &[&Attribute]) -> Result<Vec<AttrSpec>> {
                         return Err(meta.error(format!("unknown commit scheme '{other}'")));
                     }
                 },
-                "range" => specs.push(AttrSpec::Range(raw)),
+                "range" => {
+                    let parsed = parse_range(&raw).map_err(|e| meta.error(e.to_string()))?;
+                    specs.push(AttrSpec::Range(parsed));
+                }
                 "constraint" => {
                     if raw.trim_start().starts_with("merkle_member") {
-                        specs.push(AttrSpec::MerkleMember(raw));
+                        let parsed =
+                            parse_merkle_member(&raw).map_err(|e| meta.error(e.to_string()))?;
+                        specs.push(AttrSpec::MerkleMember(parsed));
                     } else {
-                        specs.push(AttrSpec::Constraint(raw));
+                        let parsed =
+                            parse_constraint(&raw).map_err(|e| meta.error(e.to_string()))?;
+                        specs.push(AttrSpec::Constraint(parsed));
                     }
                 }
                 other => {
@@ -98,6 +127,77 @@ fn parse_zk_private_attrs(attrs: &[&Attribute]) -> Result<Vec<AttrSpec>> {
     Ok(specs)
 }
 
+fn parse_range(raw: &str) -> Result<RangeSpec> {
+    let expr: ExprRange = syn::parse_str(raw)
+        .map_err(|e| ExporterError::Parse(format!("invalid range '{raw}': {e}")))?;
+    let low = expr
+        .start
+        .as_ref()
+        .ok_or_else(|| ExporterError::Parse(format!("range '{raw}' must have a lower bound")))?
+        .to_token_stream()
+        .to_string();
+    let high = expr
+        .end
+        .as_ref()
+        .ok_or_else(|| ExporterError::Parse(format!("range '{raw}' must have an upper bound")))?
+        .to_token_stream()
+        .to_string();
+    let inclusive = matches!(expr.limits, RangeLimits::Closed(_));
+    Ok(RangeSpec { low, high, inclusive })
+}
+
+fn parse_constraint(raw: &str) -> Result<Constraint> {
+    let expr: Expr = syn::parse_str(raw)
+        .map_err(|e| ExporterError::Parse(format!("invalid constraint '{raw}': {e}")))?;
+    let Expr::Binary(ExprBinary { left, op, right, .. }) = expr else {
+        return Err(ExporterError::Parse(format!(
+            "constraint '{raw}' must be a binary expression (LHS op RHS)"
+        )));
+    };
+    let lhs = left.to_token_stream().to_string();
+    if lhs.trim() != "value" {
+        return Err(ExporterError::Parse(format!(
+            "constraint LHS must be 'value' (the annotated param); got '{lhs}'"
+        )));
+    }
+    let rhs = right.to_token_stream().to_string();
+    match op {
+        syn::BinOp::Ge(_) => Ok(Constraint::Gte(rhs)),
+        syn::BinOp::Gt(_) => Ok(Constraint::Gt(rhs)),
+        syn::BinOp::Le(_) => Ok(Constraint::Lte(rhs)),
+        syn::BinOp::Lt(_) => Ok(Constraint::Lt(rhs)),
+        syn::BinOp::Eq(_) => Ok(Constraint::Eq(rhs)),
+        _ => Err(ExporterError::Parse(format!(
+            "constraint '{raw}': unsupported operator (use >=, >, <=, <, ==)"
+        ))),
+    }
+}
+
+fn parse_merkle_member(raw: &str) -> Result<MerkleMemberSpec> {
+    let expr: ExprCall = syn::parse_str(raw)
+        .map_err(|e| ExporterError::Parse(format!("invalid merkle_member call '{raw}': {e}")))?;
+    let func_name = expr.func.to_token_stream().to_string();
+    if func_name.trim() != "merkle_member" {
+        return Err(ExporterError::Parse(format!(
+            "expected 'merkle_member' function, got '{func_name}'"
+        )));
+    }
+    if expr.args.len() != 3 {
+        return Err(ExporterError::Parse(format!(
+            "merkle_member expects 3 args (value, root, siblings); got {}",
+            expr.args.len()
+        )));
+    }
+    let args: Vec<String> = expr.args.iter().map(|a| a.to_token_stream().to_string()).collect();
+    if args[0].trim() != "value" {
+        return Err(ExporterError::Parse(format!(
+            "merkle_member first arg must be 'value'; got '{}'",
+            args[0]
+        )));
+    }
+    Ok(MerkleMemberSpec { root_var: args[1].clone(), siblings_var: args[2].clone() })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -107,38 +207,190 @@ mod tests {
     }
 
     #[test]
-    fn extracts_zk_private_param_with_commit_and_range() {
+    fn extracts_commit_and_range_typed() {
         let item = parse_item(
             r#"
                 fn deposit(
-                    amount: U256,
                     #[zk_private(commit = "poseidon", range = "1000..=10000")]
                     collateral: U256,
                 ) {}
             "#,
         );
         let attrs = parse_fn(&item).unwrap();
-        assert_eq!(attrs.len(), 1);
         assert_eq!(attrs[0].param_name, "collateral");
-        assert!(attrs[0].param_type.contains("U256"));
+        assert_eq!(attrs[0].specs.len(), 2);
+        assert_eq!(attrs[0].specs[0], AttrSpec::Commit(CommitScheme::Poseidon));
+        match &attrs[0].specs[1] {
+            AttrSpec::Range(r) => {
+                assert_eq!(r.low, "1000");
+                assert_eq!(r.high, "10000");
+                assert!(r.inclusive);
+            }
+            other => panic!("expected Range, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn range_half_open() {
+        let item = parse_item(
+            r#"
+                fn foo(#[zk_private(range = "0..100")] x: u64) {}
+            "#,
+        );
+        let attrs = parse_fn(&item).unwrap();
+        match &attrs[0].specs[0] {
+            AttrSpec::Range(r) => {
+                assert_eq!(r.low, "0");
+                assert_eq!(r.high, "100");
+                assert!(!r.inclusive);
+            }
+            other => panic!("expected Range, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn range_with_path_expr_upper_bound() {
+        let item = parse_item(
+            r#"
+                fn foo(#[zk_private(range = "1000..=u128::MAX")] x: u64) {}
+            "#,
+        );
+        let attrs = parse_fn(&item).unwrap();
+        match &attrs[0].specs[0] {
+            AttrSpec::Range(r) => {
+                assert_eq!(r.low, "1000");
+                assert!(r.high.contains("u128"));
+                assert!(r.high.contains("MAX"));
+                assert!(r.inclusive);
+            }
+            other => panic!("expected Range, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn range_missing_upper_fails() {
+        let item = parse_item(
+            r#"
+                fn foo(#[zk_private(range = "1000..")] x: u64) {}
+            "#,
+        );
+        let err = parse_fn(&item).unwrap_err();
+        assert!(format!("{err}").contains("upper bound"));
+    }
+
+    #[test]
+    fn constraint_gte_typed() {
+        let item = parse_item(
+            r#"
+                fn foo(#[zk_private(constraint = "value >= threshold")] x: u64) {}
+            "#,
+        );
+        let attrs = parse_fn(&item).unwrap();
+        assert_eq!(attrs[0].specs[0], AttrSpec::Constraint(Constraint::Gte("threshold".into())));
+    }
+
+    #[test]
+    fn constraint_lt_typed() {
+        let item = parse_item(
+            r#"
+                fn foo(#[zk_private(constraint = "value < max")] x: u64) {}
+            "#,
+        );
+        let attrs = parse_fn(&item).unwrap();
+        assert_eq!(attrs[0].specs[0], AttrSpec::Constraint(Constraint::Lt("max".into())));
+    }
+
+    #[test]
+    fn constraint_eq_with_function_call_rhs() {
+        let item = parse_item(
+            r#"
+                fn foo(#[zk_private(constraint = "value == hash(other, nonce)")] x: u64) {}
+            "#,
+        );
+        let attrs = parse_fn(&item).unwrap();
+        match &attrs[0].specs[0] {
+            AttrSpec::Constraint(Constraint::Eq(rhs)) => {
+                assert!(rhs.contains("hash"));
+                assert!(rhs.contains("other"));
+                assert!(rhs.contains("nonce"));
+            }
+            other => panic!("expected Eq, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn constraint_with_non_value_lhs_fails() {
+        let item = parse_item(
+            r#"
+                fn foo(#[zk_private(constraint = "threshold >= value")] x: u64) {}
+            "#,
+        );
+        let err = parse_fn(&item).unwrap_err();
+        assert!(format!("{err}").contains("LHS"));
+    }
+
+    #[test]
+    fn constraint_unsupported_operator_fails() {
+        let item = parse_item(
+            r#"
+                fn foo(#[zk_private(constraint = "value + 1")] x: u64) {}
+            "#,
+        );
+        let err = parse_fn(&item).unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("operator") || msg.contains("LHS"));
+    }
+
+    #[test]
+    fn merkle_member_typed() {
+        let item = parse_item(
+            r#"
+                fn foo(
+                    #[zk_private(constraint = "merkle_member(value, root, siblings)")]
+                    x: u64,
+                ) {}
+            "#,
+        );
+        let attrs = parse_fn(&item).unwrap();
         assert_eq!(
-            attrs[0].specs,
-            vec![
-                AttrSpec::Commit(CommitScheme::Poseidon),
-                AttrSpec::Range("1000..=10000".to_string()),
-            ]
+            attrs[0].specs[0],
+            AttrSpec::MerkleMember(MerkleMemberSpec {
+                root_var: "root".into(),
+                siblings_var: "siblings".into(),
+            })
         );
     }
 
     #[test]
-    fn ignores_params_without_attribute() {
-        let item = parse_item("fn foo(a: u64, b: u64) {}");
-        let attrs = parse_fn(&item).unwrap();
-        assert!(attrs.is_empty());
+    fn merkle_member_wrong_first_arg_fails() {
+        let item = parse_item(
+            r#"
+                fn foo(
+                    #[zk_private(constraint = "merkle_member(other, root, siblings)")]
+                    x: u64,
+                ) {}
+            "#,
+        );
+        let err = parse_fn(&item).unwrap_err();
+        assert!(format!("{err}").contains("value"));
     }
 
     #[test]
-    fn supports_multiple_constraints() {
+    fn merkle_member_wrong_arity_fails() {
+        let item = parse_item(
+            r#"
+                fn foo(
+                    #[zk_private(constraint = "merkle_member(value, root)")]
+                    x: u64,
+                ) {}
+            "#,
+        );
+        let err = parse_fn(&item).unwrap_err();
+        assert!(format!("{err}").contains("3"));
+    }
+
+    #[test]
+    fn multiple_constraints_compose() {
         let item = parse_item(
             r#"
                 fn foo(
@@ -152,25 +404,19 @@ mod tests {
         );
         let attrs = parse_fn(&item).unwrap();
         assert_eq!(attrs[0].specs.len(), 2);
-        assert!(matches!(&attrs[0].specs[0], AttrSpec::Constraint(s) if s == "value >= threshold"));
-        assert!(matches!(&attrs[0].specs[1], AttrSpec::Constraint(s) if s == "value < max"));
+        assert!(
+            matches!(&attrs[0].specs[0], AttrSpec::Constraint(Constraint::Gte(s)) if s == "threshold")
+        );
+        assert!(
+            matches!(&attrs[0].specs[1], AttrSpec::Constraint(Constraint::Lt(s)) if s == "max")
+        );
     }
 
     #[test]
-    fn detects_merkle_member_constraint() {
-        let item = parse_item(
-            r#"
-                fn foo(
-                    #[zk_private(constraint = "merkle_member(value, root, siblings)")]
-                    x: u64,
-                ) {}
-            "#,
-        );
+    fn ignores_params_without_attribute() {
+        let item = parse_item("fn foo(a: u64, b: u64) {}");
         let attrs = parse_fn(&item).unwrap();
-        match &attrs[0].specs[0] {
-            AttrSpec::MerkleMember(s) => assert!(s.contains("merkle_member")),
-            other => panic!("expected MerkleMember, got {other:?}"),
-        }
+        assert!(attrs.is_empty());
     }
 
     #[test]
@@ -181,8 +427,7 @@ mod tests {
             "#,
         );
         let err = parse_fn(&item).unwrap_err();
-        let msg = format!("{err}");
-        assert!(msg.contains("foobar"), "expected msg to mention 'foobar', got: {msg}");
+        assert!(format!("{err}").contains("foobar"));
     }
 
     #[test]
@@ -193,8 +438,7 @@ mod tests {
             "#,
         );
         let err = parse_fn(&item).unwrap_err();
-        let msg = format!("{err}");
-        assert!(msg.contains("blake3"));
+        assert!(format!("{err}").contains("blake3"));
     }
 
     #[test]
