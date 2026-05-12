@@ -1,27 +1,11 @@
-//! ZeroStyl Privacy Debugger
+//! ZeroStyl Debugger — formatters for descriptor diagnostics.
 //!
-//! Debugging tools for halo2 zk-SNARK circuits. Provides:
-//!
-//! - **Circuit inspection**: static analysis of circuit structure (columns, gates, constraints)
-//! - **Witness debugging**: enhanced MockProver diagnostics with human-readable failure reports
-//! - **Debug reports**: structured output for identifying and fixing constraint violations
-//!
-//! # Architecture
-//!
-//! - `types` — Data structures for circuit stats, constraint info, and debug reports
-//! - `error` — Error types for the debugger
-//! - `inspector` — Static analysis of circuit structure via constraint system introspection
-//! - `witness` — Enhanced MockProver wrapper with structured failure diagnostics
+//! The actual circuit introspection lives inside each `CircuitDescriptor`
+//! (see `zerostyl-circuits`). This crate exposes pure formatters that turn
+//! the structured diagnostics into human-readable output for the CLI.
 
-pub mod error;
 pub mod inspector;
-pub mod types;
 pub mod witness;
 
-pub use error::{DebugError, Result};
-pub use inspector::inspect_circuit;
-pub use types::{
-    CircuitStats, ColumnInfo, ColumnType, ConstraintFailure, ConstraintInfo, DebugReport,
-    WitnessInfo,
-};
-pub use witness::debug_circuit;
+pub use inspector::format_introspection;
+pub use witness::{format_mock_prover_report, OutputFormat};

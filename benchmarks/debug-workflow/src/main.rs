@@ -26,7 +26,19 @@ use halo2curves::pasta::Fp;
 use private_vote::PrivateVoteCircuit;
 use state_mask::StateMaskCircuit;
 use tx_privacy::{TxPrivacyCircuit, MERKLE_DEPTH};
-use zerostyl_debugger::debug_circuit;
+use zerostyl_debugger::{format_mock_prover_report, OutputFormat};
+
+fn zerostyl_output_via_descriptor(
+    desc: &'static dyn zerostyl_circuits::CircuitDescriptor,
+    witness_json: &str,
+    k: u32,
+) -> String {
+    let report = desc
+        .mock_prove(witness_json, k)
+        .expect("descriptor.mock_prove must succeed for benchmark scenarios");
+    format_mock_prover_report(&report, OutputFormat::Text)
+        .expect("format_mock_prover_report must succeed")
+}
 
 // ─── Output analysis ────────────────────────────────────────────────────────
 
@@ -213,9 +225,16 @@ fn scenario_a() -> (ScenarioResult, String, String) {
     let raw_errors = prover.verify().expect_err("expected failure");
     let raw_output = format!("{:#?}", raw_errors);
 
-    let circuit_z = black_box(StateMaskCircuit::from_raw(value, randomness, 200, 500, threshold));
-    let report = debug_circuit(&circuit_z, pi, k, "state_mask").expect("debug_circuit failed");
-    let zerostyl_output = format!("{}", report);
+    let witness = serde_json::json!({
+        "state_value": "42",
+        "nonce": "123",
+        "collateral_ratio": "200",
+        "hidden_balance": "500",
+        "threshold": "100",
+        "_debug": { "commitment": "999" }
+    })
+    .to_string();
+    let zerostyl_output = zerostyl_output_via_descriptor(state_mask::descriptor(), &witness, k);
 
     let result = ScenarioResult::new(
         "A",
@@ -257,17 +276,20 @@ fn scenario_b() -> (ScenarioResult, String, String) {
     let raw_errors = prover.verify().expect_err("expected failure");
     let raw_output = format!("{:#?}", raw_errors);
 
-    let circuit_z = black_box(TxPrivacyCircuit::from_raw(
-        balance_old,
-        balance_new,
-        r_old,
-        r_new,
-        amount,
-        path,
-        indices,
-    ));
-    let report = debug_circuit(&circuit_z, pi, k, "tx_privacy").expect("debug_circuit failed");
-    let zerostyl_output = format!("{}", report);
+    let _ = black_box(&path);
+    let _ = black_box(&indices);
+    let zero_array: Vec<&str> = (0..MERKLE_DEPTH).map(|_| "0").collect();
+    let witness = serde_json::json!({
+        "balance_old": "1000",
+        "balance_new": "800",
+        "randomness_old": "7",
+        "randomness_new": "13",
+        "amount": "300",
+        "merkle_siblings": zero_array,
+        "merkle_indices": zero_array,
+    })
+    .to_string();
+    let zerostyl_output = zerostyl_output_via_descriptor(tx_privacy::descriptor(), &witness, k);
 
     let result = ScenarioResult::new(
         "B",
@@ -299,10 +321,15 @@ fn scenario_c() -> (ScenarioResult, String, String) {
     let raw_errors = prover.verify().expect_err("expected failure");
     let raw_output = format!("{:#?}", raw_errors);
 
-    let circuit_z =
-        black_box(PrivateVoteCircuit::from_raw(balance, r_bal, vote, r_vote, threshold));
-    let report = debug_circuit(&circuit_z, pi, k, "private_vote").expect("debug_circuit failed");
-    let zerostyl_output = format!("{}", report);
+    let witness = serde_json::json!({
+        "balance": "100",
+        "randomness_balance": "42",
+        "vote": "2",
+        "randomness_vote": "84",
+        "threshold": "50"
+    })
+    .to_string();
+    let zerostyl_output = zerostyl_output_via_descriptor(private_vote::descriptor(), &witness, k);
 
     let result = ScenarioResult::new(
         "C",

@@ -1,0 +1,20 @@
+# Enforce LF line endings on text artifacts that must round-trip across
+# Linux/macOS/Windows contributors. Snapshot tests and source files in
+# particular break if they get committed with CRLF on a Windows machine.
+
+* text=auto eol=lf
+
+*.rs       text eol=lf
+*.toml     text eol=lf
+*.md       text eol=lf
+*.json     text eol=lf
+*.snap.json text eol=lf
+*.sh       text eol=lf
+
+# Binary files should never be munged.
+*.bin    binary
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.gif    binary
+*.pdf    binary

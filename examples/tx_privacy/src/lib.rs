@@ -26,6 +26,10 @@
 //! 4. `MerkleVerify(commitment_old, siblings, indices) == merkle_root`
 //! 5. `amount ∈ [0, 2^64)`
 
+pub mod descriptor;
+
+pub use descriptor::descriptor;
+
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, SimpleFloorPlanner, Value},
     plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Instance, Selector},

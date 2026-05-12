@@ -1,0 +1,95 @@
+{
+  "public_inputs_schema": {
+    "fields": [
+      {
+        "description": "Poseidon(balance_old, randomness_old).",
+        "kind": {
+          "type": "fp"
+        },
+        "name": "commitment_old"
+      },
+      {
+        "description": "Poseidon(balance_new, randomness_new).",
+        "kind": {
+          "type": "fp"
+        },
+        "name": "commitment_new"
+      },
+      {
+        "description": "Account-set Merkle root containing commitment_old.",
+        "kind": {
+          "type": "fp"
+        },
+        "name": "merkle_root"
+      }
+    ]
+  },
+  "witness_schema": {
+    "fields": [
+      {
+        "description": "Sender balance before the transfer.",
+        "kind": {
+          "type": "u64"
+        },
+        "name": "balance_old",
+        "visibility": "private"
+      },
+      {
+        "description": "Sender balance after the transfer.",
+        "kind": {
+          "type": "u64"
+        },
+        "name": "balance_new",
+        "visibility": "private"
+      },
+      {
+        "description": "Commitment randomness for balance_old.",
+        "kind": {
+          "type": "fp"
+        },
+        "name": "randomness_old",
+        "visibility": "private"
+      },
+      {
+        "description": "Commitment randomness for balance_new.",
+        "kind": {
+          "type": "fp"
+        },
+        "name": "randomness_new",
+        "visibility": "private"
+      },
+      {
+        "description": "Transfer amount; must equal balance_old - balance_new.",
+        "kind": {
+          "type": "u64"
+        },
+        "name": "amount",
+        "visibility": "private"
+      },
+      {
+        "description": "Merkle authentication path siblings.",
+        "kind": {
+          "kind": {
+            "type": "fp"
+          },
+          "len": 32,
+          "type": "array"
+        },
+        "name": "merkle_siblings",
+        "visibility": "private"
+      },
+      {
+        "description": "Merkle path direction bits (false=left, true=right).",
+        "kind": {
+          "kind": {
+            "type": "bool"
+          },
+          "len": 32,
+          "type": "array"
+        },
+        "name": "merkle_indices",
+        "visibility": "private"
+      }
+    ]
+  }
+}

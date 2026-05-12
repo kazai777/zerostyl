@@ -24,6 +24,10 @@
 //! 3. vote_commitment == Poseidon(vote, randomness_vote)
 //! 4. balance - threshold ∈ [0, 2^RANGE_BITS) (proves balance >= threshold)
 
+pub mod descriptor;
+
+pub use descriptor::descriptor;
+
 use halo2_proofs::{
     circuit::{Layouter, SimpleFloorPlanner, Value},
     plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Instance, Selector},

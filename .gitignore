@@ -7,3 +7,4 @@ Cargo.lock
 .claude/worktrees/
 .zerostyl_cache/
 proof.bin
+public_inputs.json
