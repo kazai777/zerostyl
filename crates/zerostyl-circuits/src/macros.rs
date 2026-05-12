@@ -1,12 +1,12 @@
-/// Register a circuit with a [`Registry`].
+/// Register a circuit with a [`Registry`](crate::Registry).
 ///
 /// Expects the named crate (or in-scope module) to expose a public
 /// `descriptor() -> &'static dyn CircuitDescriptor` function — the canonical
 /// shape every ZeroStyl circuit follows. See `examples/example_demo/` for
 /// the minimal template.
 ///
-/// The macro expands to a [`Registry::register`] call, so use `?` to
-/// propagate registration errors (e.g. duplicate names).
+/// The macro expands to a [`Registry::register`](crate::Registry::register) call,
+/// so use `?` to propagate registration errors (e.g. duplicate names).
 ///
 /// # Example
 ///

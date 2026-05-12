@@ -16,6 +16,11 @@ fn snapshot_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests").join("snapshots")
 }
 
+/// Normalize line endings so snapshots are stable across Windows (CRLF) and Unix (LF).
+fn normalize(s: &str) -> String {
+    s.replace("\r\n", "\n").trim().to_string()
+}
+
 fn check_snapshot(desc: &'static dyn CircuitDescriptor) {
     let combined = serde_json::json!({
         "witness_schema": desc.witness_schema(),
@@ -29,8 +34,8 @@ fn check_snapshot(desc: &'static dyn CircuitDescriptor) {
     match std::fs::read_to_string(&snap_path) {
         Ok(expected) if !update => {
             assert_eq!(
-                actual.trim(),
-                expected.trim(),
+                normalize(&actual),
+                normalize(&expected),
                 "Schema snapshot mismatch for '{name}'.\n\
                  Run `UPDATE_SNAPSHOTS=1 cargo test -p zerostyl-cli --test snapshots` to re-bless if intentional."
             );
