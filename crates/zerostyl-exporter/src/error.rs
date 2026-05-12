@@ -8,6 +8,9 @@ pub enum ExporterError {
     #[error("invalid abi schema: {0}")]
     InvalidSchema(String),
 
+    #[error("parse error: {0}")]
+    Parse(String),
+
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
 
