@@ -4,13 +4,13 @@ version = "0.1.0"
 edition = "2021"
 authors = ["kazai777 <kazai777.dev@gmail.com>"]
 license = "MIT"
-description = "Generate privacy-safe ABI interfaces for zk-powered Stylus contracts"
+description = "Generate privacy-safe ABI metadata (AbiSchema) for zk-powered Stylus contracts"
 repository = "https://github.com/kazai777/zerostyl"
 keywords = ["arbitrum", "stylus", "zero-knowledge", "privacy", "zk-snarks"]
 categories = ["cryptography", "development-tools"]
 
 [dependencies]
-zerostyl-runtime = { path = "../zerostyl-runtime" }
+zerostyl-circuits = { path = "../zerostyl-circuits" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-anyhow = "1.0"
+thiserror = "1.0"

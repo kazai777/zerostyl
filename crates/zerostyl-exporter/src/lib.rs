@@ -1,6 +1,12 @@
-//! ZeroStyl ABI Exporter
-//!
-//! This crate generates privacy-safe Application Binary Interfaces (ABIs) for zk-powered
-//! Stylus contracts, ensuring seamless integration with frontend applications.
-//!
-//! **Status:** Planned for Milestone 3 (M3)
+//! Generates [`AbiSchema`] JSON metadata for circuits registered in a `zerostyl_circuits::Registry`.
+
+pub mod error;
+pub mod schema;
+pub mod version;
+
+pub use error::{ExporterError, Result};
+pub use schema::{
+    AbiSchema, CircuitMetadata, OnChainBinding, ProofMetadata, ProvingSystem, PublicInputsSchema,
+    WitnessSchema,
+};
+pub use version::ABI_VERSION;
