@@ -4,6 +4,7 @@ pub mod cli;
 pub mod error;
 pub mod extractor;
 pub mod parser;
+pub mod resolver;
 pub mod schema;
 pub mod version;
 
@@ -13,6 +14,7 @@ pub use extractor::from_descriptor;
 pub use parser::{
     parse_fn, AttrSpec, CommitScheme, Constraint, MerkleMemberSpec, RangeSpec, ZkPrivateAttr,
 };
+pub use resolver::{resolve, resolve_all, ComparisonOp, GadgetBinding, ResolvedAttr, MERKLE_DEPTH};
 pub use schema::{
     AbiSchema, CircuitMetadata, OnChainBinding, ProofMetadata, ProvingSystem, PublicInputsSchema,
     WitnessSchema,
