@@ -1,0 +1,46 @@
+{
+  "abi_version": 1,
+  "circuit": {
+    "name": "example",
+    "version": "1.0.0",
+    "description": "Minimal circuit proving a + b = sum. Reference template for new circuits.",
+    "default_k": 4,
+    "num_public_inputs": 1,
+    "num_private_witnesses": 2
+  },
+  "witness": {
+    "fields": [
+      {
+        "name": "a",
+        "kind": {
+          "type": "u64"
+        },
+        "visibility": "private",
+        "description": "First addend."
+      },
+      {
+        "name": "b",
+        "kind": {
+          "type": "u64"
+        },
+        "visibility": "private",
+        "description": "Second addend."
+      }
+    ]
+  },
+  "public_inputs": {
+    "fields": [
+      {
+        "name": "sum",
+        "kind": {
+          "type": "fp"
+        },
+        "description": "a + b expressed as a field element."
+      }
+    ]
+  },
+  "proof": {
+    "format_version": 1,
+    "proving_system": "halo2_ipa"
+  }
+}

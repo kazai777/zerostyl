@@ -1,0 +1,77 @@
+{
+  "abi_version": 1,
+  "circuit": {
+    "name": "state_mask",
+    "version": "1.0.0",
+    "description": "Privacy-preserving state proof: Poseidon commitment + bounded range + balance comparison.",
+    "default_k": 10,
+    "num_public_inputs": 2,
+    "num_private_witnesses": 5
+  },
+  "witness": {
+    "fields": [
+      {
+        "name": "state_value",
+        "kind": {
+          "type": "u64"
+        },
+        "visibility": "private",
+        "description": "Secret value committed via Poseidon hash."
+      },
+      {
+        "name": "nonce",
+        "kind": {
+          "type": "fp"
+        },
+        "visibility": "private",
+        "description": "Commitment randomness (Poseidon input)"
+      },
+      {
+        "name": "collateral_ratio",
+        "kind": {
+          "type": "u64"
+        },
+        "visibility": "private",
+        "description": "Must lie in [150, 300]."
+      },
+      {
+        "name": "hidden_balance",
+        "kind": {
+          "type": "u64"
+        },
+        "visibility": "private",
+        "description": "Must be strictly greater than `threshold`."
+      },
+      {
+        "name": "threshold",
+        "kind": {
+          "type": "u64"
+        },
+        "visibility": "public",
+        "description": "Public minimum balance."
+      }
+    ]
+  },
+  "public_inputs": {
+    "fields": [
+      {
+        "name": "commitment",
+        "kind": {
+          "type": "fp"
+        },
+        "description": "Poseidon(state_value, nonce)"
+      },
+      {
+        "name": "threshold",
+        "kind": {
+          "type": "fp"
+        },
+        "description": "Public threshold mirrored from witness."
+      }
+    ]
+  },
+  "proof": {
+    "format_version": 1,
+    "proving_system": "halo2_ipa"
+  }
+}

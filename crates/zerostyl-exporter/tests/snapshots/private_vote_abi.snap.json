@@ -1,0 +1,84 @@
+{
+  "abi_version": 1,
+  "circuit": {
+    "name": "private_vote",
+    "version": "1.0.0",
+    "description": "Anonymous voting: balance commitment, boolean vote, eligibility via balance ≥ threshold.",
+    "default_k": 11,
+    "num_public_inputs": 3,
+    "num_private_witnesses": 5
+  },
+  "witness": {
+    "fields": [
+      {
+        "name": "balance",
+        "kind": {
+          "type": "u64"
+        },
+        "visibility": "private",
+        "description": "Voter's token balance."
+      },
+      {
+        "name": "randomness_balance",
+        "kind": {
+          "type": "fp"
+        },
+        "visibility": "private",
+        "description": "Commitment randomness for balance."
+      },
+      {
+        "name": "vote",
+        "kind": {
+          "type": "u64"
+        },
+        "visibility": "private",
+        "description": "Boolean vote value (0 or 1)."
+      },
+      {
+        "name": "randomness_vote",
+        "kind": {
+          "type": "fp"
+        },
+        "visibility": "private",
+        "description": "Commitment randomness for vote."
+      },
+      {
+        "name": "threshold",
+        "kind": {
+          "type": "u64"
+        },
+        "visibility": "public",
+        "description": "Public minimum balance required to vote."
+      }
+    ]
+  },
+  "public_inputs": {
+    "fields": [
+      {
+        "name": "balance_commitment",
+        "kind": {
+          "type": "fp"
+        },
+        "description": "Poseidon(balance, randomness_balance)."
+      },
+      {
+        "name": "threshold",
+        "kind": {
+          "type": "fp"
+        },
+        "description": "Public eligibility threshold."
+      },
+      {
+        "name": "vote_commitment",
+        "kind": {
+          "type": "fp"
+        },
+        "description": "Poseidon(vote, randomness_vote)."
+      }
+    ]
+  },
+  "proof": {
+    "format_version": 1,
+    "proving_system": "halo2_ipa"
+  }
+}
