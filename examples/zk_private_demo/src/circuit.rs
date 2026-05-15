@@ -8,8 +8,8 @@ use halo2_proofs::{
 };
 use halo2curves::pasta::Fp;
 use zerostyl_compiler::gadgets::{
-    PoseidonCommitmentChip, PoseidonCommitmentConfig, RangeProofChip, RangeProofConfig,
-    ComparisonChip, ComparisonConfig,
+    ComparisonChip, ComparisonConfig, PoseidonCommitmentChip, PoseidonCommitmentConfig,
+    RangeProofChip, RangeProofConfig,
 };
 #[derive(Clone, Debug, Default)]
 pub struct DepositCircuit {
@@ -36,12 +36,7 @@ impl Circuit<Fp> for DepositCircuit {
         let comparison_config = ComparisonChip::configure(meta);
         let instance = meta.instance_column();
         meta.enable_equality(instance);
-        Self::Config {
-            poseidon_config,
-            range_config,
-            comparison_config,
-            instance,
-        }
+        Self::Config { poseidon_config, range_config, comparison_config, instance }
     }
     fn synthesize(
         &self,
@@ -51,56 +46,42 @@ impl Circuit<Fp> for DepositCircuit {
         let poseidon_chip = PoseidonCommitmentChip::construct(config.poseidon_config);
         let range_chip = RangeProofChip::construct(config.range_config);
         let comparison_chip = ComparisonChip::construct(config.comparison_config);
-        let collateral_poseidon_value = poseidon_chip
-            .load_private(
-                layouter.namespace(|| "load collateral for poseidon"),
-                self.collateral,
-                0,
-            )?;
-        let collateral_poseidon_nonce = poseidon_chip
-            .load_private(
-                layouter.namespace(|| "load collateral_nonce for poseidon"),
-                self.collateral_nonce,
-                1,
-            )?;
-        let collateral_commitment = poseidon_chip
-            .commit(
-                layouter.namespace(|| "commit collateral"),
-                collateral_poseidon_value.clone(),
-                collateral_poseidon_nonce,
-            )?;
+        let collateral_poseidon_value = poseidon_chip.load_private(
+            layouter.namespace(|| "load collateral for poseidon"),
+            self.collateral,
+            0,
+        )?;
+        let collateral_poseidon_nonce = poseidon_chip.load_private(
+            layouter.namespace(|| "load collateral_nonce for poseidon"),
+            self.collateral_nonce,
+            1,
+        )?;
+        let collateral_commitment = poseidon_chip.commit(
+            layouter.namespace(|| "commit collateral"),
+            collateral_poseidon_value.clone(),
+            collateral_poseidon_nonce,
+        )?;
         let collateral_commitment_ref = collateral_commitment.cell();
         layouter.constrain_instance(collateral_commitment_ref, config.instance, 0usize)?;
         let collateral_range_value = range_chip
-            .load_value(
-                layouter.namespace(|| "load collateral for range"),
-                self.collateral,
-            )?;
-        range_chip
-            .check_range_bounded(
-                layouter.namespace(|| "range check collateral"),
-                collateral_range_value,
-                Fp::from((0) as u64),
-                Fp::from(((1000000) as u64) - 1),
-                64usize,
-            )?;
+            .load_value(layouter.namespace(|| "load collateral for range"), self.collateral)?;
+        range_chip.check_range_bounded(
+            layouter.namespace(|| "range check collateral"),
+            collateral_range_value,
+            Fp::from((0) as u64),
+            Fp::from(((1000000) as u64) - 1),
+            64usize,
+        )?;
         let collateral_cmp_value = comparison_chip
-            .load_value(
-                layouter.namespace(|| "load collateral for comparison"),
-                self.collateral,
-            )?;
+            .load_value(layouter.namespace(|| "load collateral for comparison"), self.collateral)?;
         let threshold_cmp_value = comparison_chip
-            .load_value(
-                layouter.namespace(|| "load threshold for comparison"),
-                self.threshold,
-            )?;
-        comparison_chip
-            .assert_gte(
-                layouter.namespace(|| "collateral >= threshold"),
-                collateral_cmp_value,
-                threshold_cmp_value,
-                64usize,
-            )?;
+            .load_value(layouter.namespace(|| "load threshold for comparison"), self.threshold)?;
+        comparison_chip.assert_gte(
+            layouter.namespace(|| "collateral >= threshold"),
+            collateral_cmp_value,
+            threshold_cmp_value,
+            64usize,
+        )?;
         Ok(())
     }
 }

@@ -914,6 +914,63 @@ pub fn emit_descriptor(circuit_name: &str, attrs: &[ResolvedAttr]) -> Result<Str
     Ok(tokens.to_string())
 }
 
+pub fn emit_transformed_contract(item_fn: &syn::ItemFn) -> Result<String> {
+    use syn::punctuated::Punctuated;
+    use syn::{parse_quote, FnArg};
+
+    let mut transformed = item_fn.clone();
+    transformed.attrs.retain(|a| !a.path().is_ident("zk_private"));
+
+    let mut new_inputs: Punctuated<FnArg, syn::Token![,]> = Punctuated::new();
+    let mut saw_private = false;
+    for input in transformed.sig.inputs.iter() {
+        match input {
+            FnArg::Typed(typed) => {
+                let is_zk = typed.attrs.iter().any(|a| a.path().is_ident("zk_private"));
+                let mut clean = typed.clone();
+                clean.attrs.retain(|a| !a.path().is_ident("zk_private"));
+                if is_zk {
+                    saw_private = true;
+                    let name = match clean.pat.as_ref() {
+                        syn::Pat::Ident(p) => p.ident.clone(),
+                        _ => {
+                            return Err(ExporterError::Parse(
+                                "transformed contract requires named identifier params on private inputs"
+                                    .into(),
+                            ));
+                        }
+                    };
+                    let commit_ident = format_ident!("{}_commitment", name);
+                    clean.pat = Box::new(parse_quote! { #commit_ident });
+                    clean.ty = Box::new(parse_quote! { B256 });
+                }
+                new_inputs.push(FnArg::Typed(clean));
+            }
+            other => new_inputs.push(other.clone()),
+        }
+    }
+
+    if !saw_private {
+        return Err(ExporterError::Parse(
+            "emit_transformed_contract: no #[zk_private] param found; nothing to transform".into(),
+        ));
+    }
+
+    new_inputs.push(parse_quote! { proof: Bytes });
+    transformed.sig.inputs = new_inputs;
+    *transformed.block = parse_quote! { { todo!() } };
+
+    let tokens = quote! {
+        #![allow(clippy::all, dead_code, unused_variables)]
+
+        use alloy_primitives::{B256, Bytes};
+
+        #transformed
+    };
+
+    Ok(tokens.to_string())
+}
+
 fn emit_witness_json_fields(attrs: &[ResolvedAttr]) -> Vec<TokenStream> {
     let mut seen = std::collections::BTreeMap::<String, FieldKind>::new();
     let mut ordered: Vec<(String, FieldKind)> = Vec::new();
@@ -1639,5 +1696,101 @@ mod tests {
         )];
         let err = emit_descriptor("tx", &attrs).unwrap_err();
         assert!(format!("{err}").contains("PoseidonCommit"));
+    }
+
+    fn parse_fn_source(src: &str) -> syn::ItemFn {
+        syn::parse_str(src).unwrap_or_else(|e| panic!("fn source does not parse: {e}\n{src}"))
+    }
+
+    #[test]
+    fn transformed_contract_replaces_private_param_with_commitment() {
+        let item_fn = parse_fn_source(
+            r#"
+            pub fn deposit(
+                amount: U256,
+                #[zk_private(commit = "poseidon")] collateral: U256,
+                threshold: U256,
+            ) -> Result<bool, Vec<u8>> {
+                Ok(true)
+            }
+            "#,
+        );
+        let src = emit_transformed_contract(&item_fn).unwrap();
+        parse_as_file(&src);
+        assert!(src.contains("amount : U256"));
+        assert!(src.contains("collateral_commitment : B256"));
+        assert!(src.contains("threshold : U256"));
+        assert!(src.contains("proof : Bytes"));
+        assert!(!src.contains("zk_private"));
+        assert!(src.contains("todo ! ()") || src.contains("todo!()"));
+    }
+
+    #[test]
+    fn transformed_contract_emits_import_header() {
+        let item_fn = parse_fn_source(
+            r#"
+            pub fn f(#[zk_private(commit = "poseidon")] x: u64) -> bool { true }
+            "#,
+        );
+        let src = emit_transformed_contract(&item_fn).unwrap();
+        assert!(src.contains("use alloy_primitives :: { B256 , Bytes }"));
+    }
+
+    #[test]
+    fn transformed_contract_preserves_param_order() {
+        let item_fn = parse_fn_source(
+            r#"
+            pub fn order(
+                a: u64,
+                #[zk_private(commit = "poseidon")] b: u64,
+                c: u64,
+                #[zk_private(commit = "poseidon")] d: u64,
+                e: u64,
+            ) -> bool { true }
+            "#,
+        );
+        let src = emit_transformed_contract(&item_fn).unwrap();
+        let file = parse_as_file(&src);
+        let f = file
+            .items
+            .into_iter()
+            .find_map(|i| if let syn::Item::Fn(f) = i { Some(f) } else { None })
+            .expect("fn present");
+        let names: Vec<String> = f
+            .sig
+            .inputs
+            .iter()
+            .filter_map(|arg| match arg {
+                syn::FnArg::Typed(t) => match t.pat.as_ref() {
+                    syn::Pat::Ident(p) => Some(p.ident.to_string()),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect();
+        assert_eq!(names, vec!["a", "b_commitment", "c", "d_commitment", "e", "proof"]);
+    }
+
+    #[test]
+    fn transformed_contract_rejects_fn_without_private_params() {
+        let item_fn = parse_fn_source(r#"pub fn plain(x: u64) -> bool { true }"#);
+        let err = emit_transformed_contract(&item_fn).unwrap_err();
+        assert!(format!("{err}").contains("no #[zk_private]"));
+    }
+
+    #[test]
+    fn transformed_contract_preserves_return_type_and_visibility() {
+        let item_fn = parse_fn_source(
+            r#"
+            pub(crate) fn returns_result(
+                #[zk_private(commit = "poseidon")] x: U256,
+            ) -> Result<bool, Vec<u8>> {
+                Ok(true)
+            }
+            "#,
+        );
+        let src = emit_transformed_contract(&item_fn).unwrap();
+        assert!(src.contains("pub (crate)"));
+        assert!(src.contains("Result < bool , Vec < u8 > >"));
     }
 }
