@@ -2,7 +2,7 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
 use crate::error::{ExporterError, Result};
-use crate::resolver::{ComparisonOp, GadgetBinding, ResolvedAttr};
+use crate::resolver::{ComparisonOp, GadgetBinding, ResolvedAttr, MERKLE_DEPTH};
 
 pub fn emit_circuit(circuit_name: &str, attrs: &[ResolvedAttr]) -> Result<String> {
     enforce_single_poseidon(attrs)?;
@@ -597,6 +597,269 @@ fn is_simple_ident(s: &str) -> bool {
         && trimmed.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
+pub fn emit_descriptor(circuit_name: &str, attrs: &[ResolvedAttr]) -> Result<String> {
+    enforce_single_poseidon(attrs)?;
+    validate_merkle_pairing(attrs)?;
+
+    let pascal = to_pascal_case(circuit_name);
+    let circuit_ident = format_ident!("{}Circuit", pascal);
+    let descriptor_ident = format_ident!("{}Descriptor", pascal);
+    let circuit_name_lit = circuit_name.to_string();
+    let description_lit =
+        format!("Auto-generated descriptor for the '{circuit_name}' privacy-aware circuit.");
+
+    let witness_fields_init = emit_witness_schema_fields(attrs)?;
+    let public_inputs_init = emit_public_inputs_schema_fields(attrs);
+    let num_witness = count_witness_fields(attrs);
+    let num_public = count_poseidon_commits(attrs);
+    let unused_circuit = if num_public == 0 && num_witness == 0 {
+        // Reference the type so the import is never dead even on empty circuits.
+        quote! { let _ = std::marker::PhantomData::<#circuit_ident>; }
+    } else {
+        quote! {}
+    };
+
+    let tokens = quote! {
+        use std::path::Path;
+        use std::sync::OnceLock;
+
+        use zerostyl_circuits::{
+            CircuitDescriptor, CircuitError, CircuitIntrospection, FieldType, FieldVisibility,
+            MockProverReport, ProofArtifact, PublicInputField, PublicInputsSchema,
+            Result as CResult, WitnessField, WitnessSchema,
+        };
+
+        use super::circuit::#circuit_ident;
+
+        pub struct #descriptor_ident;
+
+        pub fn descriptor() -> &'static dyn CircuitDescriptor {
+            static D: #descriptor_ident = #descriptor_ident;
+            #unused_circuit
+            &D
+        }
+
+        fn witness_schema_static() -> &'static WitnessSchema {
+            static S: OnceLock<WitnessSchema> = OnceLock::new();
+            S.get_or_init(|| WitnessSchema {
+                fields: vec![ #( #witness_fields_init ),* ],
+            })
+        }
+
+        fn public_inputs_schema_static() -> &'static PublicInputsSchema {
+            static S: OnceLock<PublicInputsSchema> = OnceLock::new();
+            S.get_or_init(|| PublicInputsSchema {
+                fields: vec![ #( #public_inputs_init ),* ],
+            })
+        }
+
+        impl CircuitDescriptor for #descriptor_ident {
+            fn name(&self) -> &'static str { #circuit_name_lit }
+            fn version(&self) -> &'static str { "1.0.0" }
+            fn description(&self) -> &'static str { #description_lit }
+            fn default_k(&self) -> u32 { 10 }
+            fn num_public_inputs(&self) -> usize { #num_public }
+            fn num_private_witnesses(&self) -> usize { #num_witness }
+            fn witness_schema(&self) -> &'static WitnessSchema { witness_schema_static() }
+            fn public_inputs_schema(&self) -> &'static PublicInputsSchema {
+                public_inputs_schema_static()
+            }
+
+            fn prove(
+                &self,
+                _witness_json: &str,
+                _k: u32,
+                _cache_dir: &Path,
+            ) -> CResult<ProofArtifact> {
+                Err(CircuitError::Other(
+                    "prove() pending — implementation lands in a follow-up commit".into(),
+                ))
+            }
+
+            fn verify(
+                &self,
+                _proof: &[u8],
+                _public_inputs_json: &str,
+                _k: u32,
+                _cache_dir: &Path,
+            ) -> CResult<bool> {
+                Err(CircuitError::Other(
+                    "verify() pending — implementation lands in a follow-up commit".into(),
+                ))
+            }
+
+            fn mock_prove(&self, _witness_json: &str, _k: u32) -> CResult<MockProverReport> {
+                Err(CircuitError::Other(
+                    "mock_prove() pending — implementation lands in a follow-up commit".into(),
+                ))
+            }
+
+            fn inspect(&self) -> CResult<CircuitIntrospection> {
+                Err(CircuitError::Other(
+                    "inspect() pending — implementation lands in a follow-up commit".into(),
+                ))
+            }
+        }
+    };
+
+    Ok(tokens.to_string())
+}
+
+fn count_witness_fields(attrs: &[ResolvedAttr]) -> usize {
+    let mut seen = std::collections::BTreeSet::new();
+    for attr in attrs {
+        seen.insert(attr.param_name.clone());
+        for b in &attr.bindings {
+            match b {
+                GadgetBinding::PoseidonCommit { nonce_var } => {
+                    seen.insert(nonce_var.clone());
+                }
+                GadgetBinding::Comparison { other, .. } => {
+                    if is_simple_ident(other) {
+                        seen.insert(other.clone());
+                    }
+                }
+                GadgetBinding::MerkleMember { root_var, siblings_var, indices_var, .. } => {
+                    seen.insert(root_var.clone());
+                    seen.insert(siblings_var.clone());
+                    seen.insert(indices_var.clone());
+                }
+                GadgetBinding::Range { .. } => {}
+            }
+        }
+    }
+    seen.len()
+}
+
+fn count_poseidon_commits(attrs: &[ResolvedAttr]) -> usize {
+    attrs
+        .iter()
+        .flat_map(|a| a.bindings.iter())
+        .filter(|b| matches!(b, GadgetBinding::PoseidonCommit { .. }))
+        .count()
+}
+
+fn field_type_token(ty: &str) -> Result<TokenStream> {
+    let cleaned = ty.split("::").last().unwrap_or(ty).trim();
+    match cleaned {
+        "u8" | "u16" | "u32" | "u64" => Ok(quote! { FieldType::U64 }),
+        "u128" => Ok(quote! { FieldType::U128 }),
+        "bool" => Ok(quote! { FieldType::Bool }),
+        "U256" => Ok(quote! { FieldType::Fp }),
+        other => Err(ExporterError::Parse(format!(
+            "cannot map type '{other}' to FieldType (supported: u8/u16/u32/u64/u128/bool/U256)"
+        ))),
+    }
+}
+
+fn emit_witness_schema_fields(attrs: &[ResolvedAttr]) -> Result<Vec<TokenStream>> {
+    let mut seen = std::collections::BTreeSet::new();
+    let mut out = Vec::new();
+    for attr in attrs {
+        if seen.insert(attr.param_name.clone()) {
+            let name = &attr.param_name;
+            let kind = field_type_token(&attr.param_type)?;
+            out.push(quote! {
+                WitnessField {
+                    name: #name.into(),
+                    kind: #kind,
+                    visibility: FieldVisibility::Private,
+                    description: None,
+                }
+            });
+        }
+        for b in &attr.bindings {
+            match b {
+                GadgetBinding::PoseidonCommit { nonce_var } => {
+                    if seen.insert(nonce_var.clone()) {
+                        out.push(quote! {
+                            WitnessField {
+                                name: #nonce_var.into(),
+                                kind: FieldType::Fp,
+                                visibility: FieldVisibility::Private,
+                                description: None,
+                            }
+                        });
+                    }
+                }
+                GadgetBinding::Comparison { other, .. } => {
+                    if is_simple_ident(other) && seen.insert(other.clone()) {
+                        let kind = field_type_token(&attr.param_type)?;
+                        out.push(quote! {
+                            WitnessField {
+                                name: #other.into(),
+                                kind: #kind,
+                                visibility: FieldVisibility::Private,
+                                description: None,
+                            }
+                        });
+                    }
+                }
+                GadgetBinding::MerkleMember { root_var, siblings_var, indices_var, .. } => {
+                    if seen.insert(root_var.clone()) {
+                        out.push(quote! {
+                            WitnessField {
+                                name: #root_var.into(),
+                                kind: FieldType::Fp,
+                                visibility: FieldVisibility::Private,
+                                description: None,
+                            }
+                        });
+                    }
+                    let depth = MERKLE_DEPTH;
+                    if seen.insert(siblings_var.clone()) {
+                        out.push(quote! {
+                            WitnessField {
+                                name: #siblings_var.into(),
+                                kind: FieldType::Array {
+                                    kind: Box::new(FieldType::Fp),
+                                    len: #depth,
+                                },
+                                visibility: FieldVisibility::Private,
+                                description: None,
+                            }
+                        });
+                    }
+                    if seen.insert(indices_var.clone()) {
+                        out.push(quote! {
+                            WitnessField {
+                                name: #indices_var.into(),
+                                kind: FieldType::Array {
+                                    kind: Box::new(FieldType::Bool),
+                                    len: #depth,
+                                },
+                                visibility: FieldVisibility::Private,
+                                description: None,
+                            }
+                        });
+                    }
+                }
+                GadgetBinding::Range { .. } => {}
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn emit_public_inputs_schema_fields(attrs: &[ResolvedAttr]) -> Vec<TokenStream> {
+    let mut out = Vec::new();
+    for attr in attrs {
+        for b in &attr.bindings {
+            if matches!(b, GadgetBinding::PoseidonCommit { .. }) {
+                let name = format!("{}_commitment", attr.param_name);
+                out.push(quote! {
+                    PublicInputField {
+                        name: #name.into(),
+                        kind: FieldType::Fp,
+                        description: None,
+                    }
+                });
+            }
+        }
+    }
+    out
+}
+
 fn to_pascal_case(s: &str) -> String {
     let mut out = String::new();
     let mut capitalize = true;
@@ -895,5 +1158,127 @@ mod tests {
                 || src.contains("#[derive(Clone, Debug, Default)]")
         );
         assert!(!src.contains("impl Default for"));
+    }
+
+    #[test]
+    fn descriptor_parses_as_valid_rust() {
+        let attrs =
+            vec![resolved("collateral", "u64", vec![AttrSpec::Commit(CommitScheme::Poseidon)])];
+        let src = emit_descriptor("deposit", &attrs).unwrap();
+        parse_as_file(&src);
+    }
+
+    #[test]
+    fn descriptor_struct_and_factory_present() {
+        let attrs = vec![resolved("x", "u64", vec![AttrSpec::Commit(CommitScheme::Poseidon)])];
+        let src = emit_descriptor("foo", &attrs).unwrap();
+        assert!(src.contains("struct FooDescriptor"));
+        assert!(src.contains("pub fn descriptor"));
+        assert!(
+            src.contains("& 'static dyn CircuitDescriptor")
+                || src.contains("&'static dyn CircuitDescriptor")
+        );
+    }
+
+    #[test]
+    fn descriptor_metadata_uses_circuit_name() {
+        let attrs = vec![resolved("x", "u64", vec![AttrSpec::Commit(CommitScheme::Poseidon)])];
+        let src = emit_descriptor("private_lending", &attrs).unwrap();
+        assert!(src.contains("\"private_lending\""));
+        assert!(src.contains("PrivateLendingDescriptor"));
+        assert!(
+            src.contains("super :: circuit :: PrivateLendingCircuit")
+                || src.contains("super::circuit::PrivateLendingCircuit")
+        );
+    }
+
+    #[test]
+    fn descriptor_witness_schema_lists_each_witness() {
+        let attrs = vec![resolved(
+            "collateral",
+            "u64",
+            vec![
+                AttrSpec::Commit(CommitScheme::Poseidon),
+                AttrSpec::Constraint(Constraint::Gte("threshold".into())),
+            ],
+        )];
+        let src = emit_descriptor("deposit", &attrs).unwrap();
+        assert!(src.contains("\"collateral\""));
+        assert!(src.contains("\"collateral_nonce\""));
+        assert!(src.contains("\"threshold\""));
+        assert!(
+            src.contains("FieldVisibility :: Private") || src.contains("FieldVisibility::Private")
+        );
+    }
+
+    #[test]
+    fn descriptor_public_inputs_one_per_poseidon_commit() {
+        let attrs = vec![resolved("x", "u64", vec![AttrSpec::Commit(CommitScheme::Poseidon)])];
+        let src = emit_descriptor("foo", &attrs).unwrap();
+        assert!(src.contains("\"x_commitment\""));
+    }
+
+    #[test]
+    fn descriptor_no_poseidon_means_no_public_inputs() {
+        let attrs = vec![resolved(
+            "x",
+            "u64",
+            vec![AttrSpec::Range(RangeSpec {
+                low: "0".into(),
+                high: "100".into(),
+                inclusive: true,
+            })],
+        )];
+        let src = emit_descriptor("foo", &attrs).unwrap();
+        assert!(!src.contains("_commitment"));
+        assert!(
+            src.contains("num_public_inputs (& self) -> usize { 0usize }")
+                || src.contains("num_public_inputs(&self) -> usize { 0usize }")
+        );
+    }
+
+    #[test]
+    fn descriptor_merkle_emits_array_field_type() {
+        let attrs = vec![resolved(
+            "leaf",
+            "u64",
+            vec![
+                AttrSpec::Commit(CommitScheme::Poseidon),
+                AttrSpec::MerkleMember(MerkleMemberSpec {
+                    root_var: "root".into(),
+                    siblings_var: "siblings".into(),
+                    indices_var: "indices".into(),
+                }),
+            ],
+        )];
+        let src = emit_descriptor("tx", &attrs).unwrap();
+        assert!(src.contains("FieldType :: Array") || src.contains("FieldType::Array"));
+        assert!(src.contains("\"siblings\""));
+        assert!(src.contains("\"indices\""));
+        assert!(src.contains("32usize") || src.contains("len : 32"));
+    }
+
+    #[test]
+    fn descriptor_methods_stubbed_with_error() {
+        let attrs = vec![resolved("x", "u64", vec![AttrSpec::Commit(CommitScheme::Poseidon)])];
+        let src = emit_descriptor("foo", &attrs).unwrap();
+        let stub_count = src.matches("CircuitError :: Other").count()
+            + src.matches("CircuitError::Other").count();
+        assert!(stub_count >= 4, "expected ≥4 stubbed methods, got {stub_count}");
+    }
+
+    #[test]
+    fn descriptor_rejects_merkle_without_poseidon() {
+        let attrs = vec![resolved(
+            "leaf",
+            "u64",
+            vec![AttrSpec::MerkleMember(MerkleMemberSpec {
+                root_var: "root".into(),
+                siblings_var: "siblings".into(),
+                indices_var: "indices".into(),
+            })],
+        )];
+        let err = emit_descriptor("tx", &attrs).unwrap_err();
+        assert!(format!("{err}").contains("PoseidonCommit"));
     }
 }
