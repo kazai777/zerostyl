@@ -26,6 +26,8 @@ pub fn emit_circuit(circuit_name: &str, attrs: &[ResolvedAttr]) -> Result<String
     let (struct_derive, default_impl) = emit_struct_derive(attrs, &circuit_ident);
 
     let tokens = quote! {
+        #![allow(clippy::all, dead_code)]
+
         #imports
 
         #depth_const
@@ -571,9 +573,9 @@ fn emit_merkle(
 fn op_method(op: ComparisonOp) -> Result<&'static str> {
     match op {
         ComparisonOp::Gt => Ok("assert_gt"),
-        ComparisonOp::Gte => Ok("assert_ge"),
+        ComparisonOp::Gte => Ok("assert_gte"),
         ComparisonOp::Lt => Ok("assert_lt"),
-        ComparisonOp::Lte => Ok("assert_le"),
+        ComparisonOp::Lte => Ok("assert_lte"),
         ComparisonOp::Eq => Err(ExporterError::Parse(
             "equality comparison not supported by ComparisonChip; use a different gadget".into(),
         )),
@@ -624,6 +626,8 @@ pub fn emit_descriptor(circuit_name: &str, attrs: &[ResolvedAttr]) -> Result<Str
     };
 
     let tokens = quote! {
+        #![allow(clippy::all, dead_code)]
+
         use std::path::Path;
         use std::sync::OnceLock;
 
@@ -1291,7 +1295,7 @@ mod tests {
     }
 
     #[test]
-    fn comparison_circuit_parses_and_calls_assert_ge() {
+    fn comparison_circuit_parses_and_calls_assert_gte() {
         let attrs = vec![resolved(
             "x",
             "u64",
@@ -1300,7 +1304,7 @@ mod tests {
         let src = emit_circuit("foo", &attrs).unwrap();
         parse_as_file(&src);
         assert!(src.contains("ComparisonChip"));
-        assert!(src.contains("assert_ge"));
+        assert!(src.contains("assert_gte"));
         assert!(src.contains("threshold"));
     }
 
@@ -1308,9 +1312,9 @@ mod tests {
     fn comparison_methods_per_op() {
         for (op, method) in [
             (Constraint::Gt("y".into()), "assert_gt"),
-            (Constraint::Gte("y".into()), "assert_ge"),
+            (Constraint::Gte("y".into()), "assert_gte"),
             (Constraint::Lt("y".into()), "assert_lt"),
-            (Constraint::Lte("y".into()), "assert_le"),
+            (Constraint::Lte("y".into()), "assert_lte"),
         ] {
             let attrs = vec![resolved("x", "u64", vec![AttrSpec::Constraint(op)])];
             let src = emit_circuit("foo", &attrs).unwrap();
