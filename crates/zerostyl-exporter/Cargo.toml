@@ -23,9 +23,10 @@ clap = { version = "4.5", features = ["derive"] }
 syn = { version = "2.0", features = ["full", "parsing"] }
 quote = "1.0"
 proc-macro2 = "1.0"
+prettyplease = "0.2"
 
 [dev-dependencies]
-prettyplease = "0.2"
+tempfile = "3.0"
 zk_private_demo = { path = "../../examples/zk_private_demo" }
 
 [lib]

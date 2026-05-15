@@ -5,6 +5,7 @@ use clap::{Parser, Subcommand};
 use zerostyl_circuits::Registry;
 
 use crate::extractor::from_descriptor;
+use crate::transform::transform_contract;
 
 #[derive(Parser)]
 #[command(name = "zerostyl-export")]
@@ -25,6 +26,19 @@ pub enum Commands {
     },
     /// List every registered circuit with its summary.
     List,
+    /// Transform an annotated Stylus contract into circuit.rs, descriptor.rs,
+    /// contract_transformed.rs, and abi.json.
+    Transform {
+        /// Path to a Rust source file containing a fn with `#[zk_private]` params.
+        #[arg(short, long)]
+        contract: PathBuf,
+        /// Override the circuit name (defaults to the fn identifier).
+        #[arg(short, long)]
+        name: Option<String>,
+        /// Directory to write the four generated artifacts (created if missing).
+        #[arg(short, long, default_value = "generated")]
+        output_dir: PathBuf,
+    },
 }
 
 pub fn run(registry: &Registry) -> Result<()> {
@@ -32,7 +46,21 @@ pub fn run(registry: &Registry) -> Result<()> {
     match cli.command {
         Commands::Schema { circuit, output } => cmd_schema(registry, &circuit, output.as_deref()),
         Commands::List => cmd_list(registry),
+        Commands::Transform { contract, name, output_dir } => {
+            cmd_transform(&contract, name.as_deref(), &output_dir)
+        }
     }
+}
+
+fn cmd_transform(contract: &Path, name: Option<&str>, output_dir: &Path) -> Result<()> {
+    let report =
+        transform_contract(contract, name, output_dir).map_err(|e| anyhow::anyhow!("{e}"))?;
+    eprintln!("transformed circuit '{}' -> {}", report.circuit_name, output_dir.display());
+    eprintln!("  {}", report.circuit_path.display());
+    eprintln!("  {}", report.descriptor_path.display());
+    eprintln!("  {}", report.contract_transformed_path.display());
+    eprintln!("  {}", report.abi_json_path.display());
+    Ok(())
 }
 
 fn cmd_schema(registry: &Registry, circuit_name: &str, output: Option<&Path>) -> Result<()> {
