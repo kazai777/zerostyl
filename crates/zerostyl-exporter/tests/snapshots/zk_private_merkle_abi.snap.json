@@ -1,0 +1,72 @@
+{
+  "abi_version": 1,
+  "circuit": {
+    "name": "claim",
+    "version": "1.0.0",
+    "description": "Auto-generated descriptor for the 'claim' privacy-aware circuit.",
+    "default_k": 10,
+    "num_public_inputs": 1,
+    "num_private_witnesses": 5
+  },
+  "witness": {
+    "fields": [
+      {
+        "name": "leaf",
+        "kind": {
+          "type": "fp"
+        },
+        "visibility": "private"
+      },
+      {
+        "name": "leaf_nonce",
+        "kind": {
+          "type": "fp"
+        },
+        "visibility": "private"
+      },
+      {
+        "name": "root",
+        "kind": {
+          "type": "fp"
+        },
+        "visibility": "private"
+      },
+      {
+        "name": "siblings",
+        "kind": {
+          "type": "array",
+          "kind": {
+            "type": "fp"
+          },
+          "len": 32
+        },
+        "visibility": "private"
+      },
+      {
+        "name": "indices",
+        "kind": {
+          "type": "array",
+          "kind": {
+            "type": "bool"
+          },
+          "len": 32
+        },
+        "visibility": "private"
+      }
+    ]
+  },
+  "public_inputs": {
+    "fields": [
+      {
+        "name": "leaf_commitment",
+        "kind": {
+          "type": "fp"
+        }
+      }
+    ]
+  },
+  "proof": {
+    "format_version": 1,
+    "proving_system": "halo2_ipa"
+  }
+}

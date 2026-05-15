@@ -1,0 +1,10 @@
+pub fn deposit(
+    #[zk_private(
+        commit = "poseidon",
+        range = "1000..=100000"
+    )]
+    amount: U256,
+) -> bool {
+    let _ = amount;
+    true
+}

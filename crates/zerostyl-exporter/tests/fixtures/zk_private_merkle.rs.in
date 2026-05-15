@@ -1,0 +1,10 @@
+pub fn claim(
+    #[zk_private(
+        commit = "poseidon",
+        constraint = "merkle_member(value, root, siblings, indices)"
+    )]
+    leaf: U256,
+) -> bool {
+    let _ = leaf;
+    true
+}
