@@ -612,9 +612,13 @@ pub fn emit_descriptor(circuit_name: &str, attrs: &[ResolvedAttr]) -> Result<Str
     let public_inputs_init = emit_public_inputs_schema_fields(attrs);
     let num_witness = count_witness_fields(attrs);
     let num_public = count_poseidon_commits(attrs);
-    let unused_circuit = if num_public == 0 && num_witness == 0 {
-        // Reference the type so the import is never dead even on empty circuits.
-        quote! { let _ = std::marker::PhantomData::<#circuit_ident>; }
+    let chips = collect_chip_usage(attrs);
+
+    let witness_json_fields = emit_witness_json_fields(attrs);
+    let build_inputs_body = emit_build_inputs_body(attrs, &circuit_ident);
+
+    let merkle_const = if chips.merkle {
+        quote! { const MERKLE_DEPTH: usize = 32; }
     } else {
         quote! {}
     };
@@ -623,20 +627,166 @@ pub fn emit_descriptor(circuit_name: &str, attrs: &[ResolvedAttr]) -> Result<Str
         use std::path::Path;
         use std::sync::OnceLock;
 
-        use zerostyl_circuits::{
-            CircuitDescriptor, CircuitError, CircuitIntrospection, FieldType, FieldVisibility,
-            MockProverReport, ProofArtifact, PublicInputField, PublicInputsSchema,
-            Result as CResult, WitnessField, WitnessSchema,
+        use halo2_proofs::{
+            circuit::Value,
+            dev::{MockProver, VerifyFailure},
+            plonk::{Circuit, ConstraintSystem},
         };
+        use halo2curves::pasta::Fp;
+        use serde::{Deserialize, Serialize};
+        use zerostyl_circuits::{
+            CircuitDescriptor, CircuitError, CircuitIntrospection, FailureEntry, FailureKind,
+            FieldType, FieldVisibility, MockProverReport, ProofArtifact, PublicInputField,
+            PublicInputsSchema, Result as CResult, WitnessField, WitnessSchema,
+        };
+        use zerostyl_compiler::codegen::{keys::KeyMetadata, prover::NativeProver};
+        use zerostyl_compiler::gadgets::PoseidonCommitmentChip;
 
         use super::circuit::#circuit_ident;
 
-        pub struct #descriptor_ident;
+        const NAME: &str = #circuit_name_lit;
+        const VERSION: &str = "1.0.0";
+        const DESCRIPTION: &str = #description_lit;
+        const DEFAULT_K: u32 = 10;
+        const NUM_PUBLIC_INPUTS: usize = #num_public;
+        const NUM_PRIVATE_WITNESSES: usize = #num_witness;
 
-        pub fn descriptor() -> &'static dyn CircuitDescriptor {
-            static D: #descriptor_ident = #descriptor_ident;
-            #unused_circuit
-            &D
+        #merkle_const
+
+        #[derive(Debug, Deserialize)]
+        struct WitnessJson {
+            #( #witness_json_fields, )*
+        }
+
+        #[derive(Debug, Serialize, Deserialize)]
+        struct PublicInputsJson {
+            inputs: Vec<Vec<String>>,
+        }
+
+        struct ParsedInputs {
+            circuit: #circuit_ident,
+            public_inputs: Vec<Vec<Fp>>,
+        }
+
+        fn parse_u64(s: &str, field: &str) -> CResult<u64> {
+            s.parse::<u64>().map_err(|_| {
+                CircuitError::InvalidWitness(format!("field '{field}': expected u64, got '{s}'"))
+            })
+        }
+
+        fn parse_field(s: &str) -> CResult<Fp> {
+            use halo2curves::group::ff::PrimeField;
+            if let Some(hex_str) = s.strip_prefix("0x") {
+                let bytes = hex::decode(hex_str)
+                    .map_err(|e| CircuitError::InvalidWitness(format!("invalid hex '{s}': {e}")))?;
+                let mut repr = [0u8; 32];
+                let len = bytes.len().min(32);
+                repr[..len].copy_from_slice(&bytes[..len]);
+                Option::from(Fp::from_repr(repr)).ok_or_else(|| {
+                    CircuitError::InvalidWitness(format!("invalid field element '{s}'"))
+                })
+            } else {
+                Ok(Fp::from(parse_u64(s, "field")?))
+            }
+        }
+
+        fn parse_witness(json: &str) -> CResult<WitnessJson> {
+            serde_json::from_str(json)
+                .map_err(|e| CircuitError::InvalidWitness(format!("{NAME} witness JSON: {e}")))
+        }
+
+        fn build_inputs(w: &WitnessJson) -> CResult<ParsedInputs> {
+            #build_inputs_body
+        }
+
+        fn encode_public_inputs(inputs: &[Vec<Fp>]) -> String {
+            use halo2curves::group::ff::PrimeField;
+            let rows: Vec<Vec<String>> = inputs
+                .iter()
+                .map(|row| {
+                    row.iter().map(|fp| format!("0x{}", hex::encode(fp.to_repr()))).collect()
+                })
+                .collect();
+            serde_json::to_string_pretty(&PublicInputsJson { inputs: rows })
+                .expect("PublicInputsJson serialization is infallible")
+        }
+
+        fn decode_public_inputs(json: &str) -> CResult<Vec<Vec<Fp>>> {
+            let parsed: PublicInputsJson = serde_json::from_str(json)?;
+            parsed
+                .inputs
+                .iter()
+                .map(|row| row.iter().map(|s| parse_field(s)).collect())
+                .collect()
+        }
+
+        fn convert_failure(f: &VerifyFailure) -> FailureEntry {
+            let details = format!("{f}");
+            match f {
+                VerifyFailure::ConstraintNotSatisfied { constraint, location, .. } => {
+                    FailureEntry {
+                        kind: FailureKind::ConstraintNotSatisfied,
+                        gate_name: Some(format!("{constraint}")),
+                        region: Some(format!("{location}")),
+                        row: None,
+                        column: None,
+                        details,
+                    }
+                }
+                VerifyFailure::CellNotAssigned { gate, gate_offset, column, .. } => FailureEntry {
+                    kind: FailureKind::ConstraintNotSatisfied,
+                    gate_name: Some(format!("{gate}")),
+                    region: None,
+                    row: Some(*gate_offset),
+                    column: Some(format!("{column:?}")),
+                    details,
+                },
+                VerifyFailure::InstanceCellNotAssigned { gate, column, row, .. } => {
+                    FailureEntry {
+                        kind: FailureKind::InstanceCellMismatch,
+                        gate_name: Some(format!("{gate}")),
+                        region: None,
+                        row: Some(*row),
+                        column: Some(format!("{column:?}")),
+                        details,
+                    }
+                }
+                VerifyFailure::ConstraintPoisoned { constraint } => FailureEntry {
+                    kind: FailureKind::ConstraintNotSatisfied,
+                    gate_name: Some(format!("{constraint}")),
+                    region: None,
+                    row: None,
+                    column: None,
+                    details,
+                },
+                VerifyFailure::Lookup { lookup_index, location } => FailureEntry {
+                    kind: FailureKind::Lookup,
+                    gate_name: Some(format!("lookup[{lookup_index}]")),
+                    region: Some(format!("{location}")),
+                    row: None,
+                    column: None,
+                    details,
+                },
+                VerifyFailure::Permutation { column, location } => FailureEntry {
+                    kind: FailureKind::Permutation,
+                    gate_name: None,
+                    region: Some(format!("{location}")),
+                    row: None,
+                    column: Some(format!("{column}")),
+                    details,
+                },
+            }
+        }
+
+        fn parse_usize_field(debug_str: &str, name: &str) -> usize {
+            let needle = format!("{name}: ");
+            if let Some(start) = debug_str.find(&needle) {
+                let after = &debug_str[start + needle.len()..];
+                let end = after.find(|c: char| !c.is_ascii_digit()).unwrap_or(after.len());
+                after[..end].parse().unwrap_or(0)
+            } else {
+                0
+            }
         }
 
         fn witness_schema_static() -> &'static WitnessSchema {
@@ -653,13 +803,20 @@ pub fn emit_descriptor(circuit_name: &str, attrs: &[ResolvedAttr]) -> Result<Str
             })
         }
 
+        pub struct #descriptor_ident;
+
+        pub fn descriptor() -> &'static dyn CircuitDescriptor {
+            static D: #descriptor_ident = #descriptor_ident;
+            &D
+        }
+
         impl CircuitDescriptor for #descriptor_ident {
-            fn name(&self) -> &'static str { #circuit_name_lit }
-            fn version(&self) -> &'static str { "1.0.0" }
-            fn description(&self) -> &'static str { #description_lit }
-            fn default_k(&self) -> u32 { 10 }
-            fn num_public_inputs(&self) -> usize { #num_public }
-            fn num_private_witnesses(&self) -> usize { #num_witness }
+            fn name(&self) -> &'static str { NAME }
+            fn version(&self) -> &'static str { VERSION }
+            fn description(&self) -> &'static str { DESCRIPTION }
+            fn default_k(&self) -> u32 { DEFAULT_K }
+            fn num_public_inputs(&self) -> usize { NUM_PUBLIC_INPUTS }
+            fn num_private_witnesses(&self) -> usize { NUM_PRIVATE_WITNESSES }
             fn witness_schema(&self) -> &'static WitnessSchema { witness_schema_static() }
             fn public_inputs_schema(&self) -> &'static PublicInputsSchema {
                 public_inputs_schema_static()
@@ -667,42 +824,231 @@ pub fn emit_descriptor(circuit_name: &str, attrs: &[ResolvedAttr]) -> Result<Str
 
             fn prove(
                 &self,
-                _witness_json: &str,
-                _k: u32,
-                _cache_dir: &Path,
+                witness_json: &str,
+                k: u32,
+                cache_dir: &Path,
             ) -> CResult<ProofArtifact> {
-                Err(CircuitError::Other(
-                    "prove() pending — implementation lands in a follow-up commit".into(),
-                ))
+                let w = parse_witness(witness_json)?;
+                let ParsedInputs { circuit, public_inputs } = build_inputs(&w)?;
+                let mut prover = NativeProver::with_cache_dir(circuit, k, cache_dir)
+                    .map_err(|e| CircuitError::ProveFailed(e.to_string()))?;
+                prover
+                    .setup(KeyMetadata {
+                        circuit_name: NAME.to_string(),
+                        k,
+                        num_public_inputs: NUM_PUBLIC_INPUTS,
+                        num_private_witnesses: NUM_PRIVATE_WITNESSES,
+                    })
+                    .map_err(|e| CircuitError::ProveFailed(e.to_string()))?;
+                let proof_bytes = prover
+                    .generate_proof(&public_inputs)
+                    .map_err(|e| CircuitError::ProveFailed(e.to_string()))?;
+                Ok(ProofArtifact::new(proof_bytes, encode_public_inputs(&public_inputs)))
             }
 
             fn verify(
                 &self,
-                _proof: &[u8],
-                _public_inputs_json: &str,
-                _k: u32,
-                _cache_dir: &Path,
+                proof: &[u8],
+                public_inputs_json: &str,
+                k: u32,
+                cache_dir: &Path,
             ) -> CResult<bool> {
-                Err(CircuitError::Other(
-                    "verify() pending — implementation lands in a follow-up commit".into(),
-                ))
+                let public_inputs = decode_public_inputs(public_inputs_json)?;
+                let circuit = #circuit_ident::default();
+                let mut prover = NativeProver::with_cache_dir(circuit, k, cache_dir)
+                    .map_err(|e| CircuitError::VerifyFailed(e.to_string()))?;
+                prover
+                    .setup(KeyMetadata {
+                        circuit_name: NAME.to_string(),
+                        k,
+                        num_public_inputs: NUM_PUBLIC_INPUTS,
+                        num_private_witnesses: NUM_PRIVATE_WITNESSES,
+                    })
+                    .map_err(|e| CircuitError::VerifyFailed(e.to_string()))?;
+                prover
+                    .verify_proof(proof, &public_inputs)
+                    .map_err(|e| CircuitError::VerifyFailed(e.to_string()))
             }
 
-            fn mock_prove(&self, _witness_json: &str, _k: u32) -> CResult<MockProverReport> {
-                Err(CircuitError::Other(
-                    "mock_prove() pending — implementation lands in a follow-up commit".into(),
-                ))
+            fn mock_prove(&self, witness_json: &str, k: u32) -> CResult<MockProverReport> {
+                let w = parse_witness(witness_json)?;
+                let ParsedInputs { circuit, public_inputs } = build_inputs(&w)?;
+                let prover = MockProver::run(k, &circuit, public_inputs).map_err(|e| {
+                    CircuitError::Other(format!("MockProver setup failed: {e:?}"))
+                })?;
+                let (satisfied, failures) = match prover.verify() {
+                    Ok(()) => (true, Vec::new()),
+                    Err(errs) => (false, errs.iter().map(convert_failure).collect()),
+                };
+                Ok(MockProverReport {
+                    circuit_name: NAME.to_string(),
+                    k,
+                    satisfied,
+                    failures,
+                })
             }
 
             fn inspect(&self) -> CResult<CircuitIntrospection> {
-                Err(CircuitError::Other(
-                    "inspect() pending — implementation lands in a follow-up commit".into(),
-                ))
+                let mut cs = ConstraintSystem::<Fp>::default();
+                let _ = #circuit_ident::configure(&mut cs);
+                let debug = format!("{:?}", cs.pinned());
+                Ok(CircuitIntrospection {
+                    circuit_name: NAME.to_string(),
+                    k: DEFAULT_K,
+                    num_advice_columns: parse_usize_field(&debug, "num_advice_columns"),
+                    num_fixed_columns: parse_usize_field(&debug, "num_fixed_columns"),
+                    num_instance_columns: parse_usize_field(&debug, "num_instance_columns"),
+                    num_selectors: parse_usize_field(&debug, "num_selectors"),
+                    max_constraint_degree: cs.degree(),
+                    gates: Vec::new(),
+                    columns: Vec::new(),
+                })
             }
         }
     };
 
     Ok(tokens.to_string())
+}
+
+fn emit_witness_json_fields(attrs: &[ResolvedAttr]) -> Vec<TokenStream> {
+    let mut seen = std::collections::BTreeMap::<String, FieldKind>::new();
+    let mut ordered: Vec<(String, FieldKind)> = Vec::new();
+    let mut add = |name: &str, kind: FieldKind| {
+        if !seen.contains_key(name) {
+            ordered.push((
+                name.to_string(),
+                match kind {
+                    FieldKind::Scalar => FieldKind::Scalar,
+                    FieldKind::VecScalar => FieldKind::VecScalar,
+                },
+            ));
+            seen.insert(name.to_string(), kind);
+        }
+    };
+    for attr in attrs {
+        add(&attr.param_name, FieldKind::Scalar);
+        for b in &attr.bindings {
+            match b {
+                GadgetBinding::PoseidonCommit { nonce_var } => {
+                    add(nonce_var, FieldKind::Scalar);
+                }
+                GadgetBinding::Comparison { other, .. } => {
+                    if is_simple_ident(other) {
+                        add(other, FieldKind::Scalar);
+                    }
+                }
+                GadgetBinding::MerkleMember { root_var, siblings_var, indices_var, .. } => {
+                    add(root_var, FieldKind::Scalar);
+                    add(siblings_var, FieldKind::VecScalar);
+                    add(indices_var, FieldKind::VecScalar);
+                }
+                GadgetBinding::Range { .. } => {}
+            }
+        }
+    }
+    ordered
+        .into_iter()
+        .map(|(name, kind)| {
+            let ident = format_ident!("{}", name);
+            match kind {
+                FieldKind::Scalar => quote! { #ident: String },
+                FieldKind::VecScalar => quote! { #ident: Vec<String> },
+            }
+        })
+        .collect()
+}
+
+fn emit_build_inputs_body(attrs: &[ResolvedAttr], circuit_ident: &syn::Ident) -> TokenStream {
+    let mut seen = std::collections::BTreeSet::new();
+    let mut scalar_parses = Vec::<TokenStream>::new();
+    let mut vec_parses = Vec::<TokenStream>::new();
+    let mut commitments = Vec::<TokenStream>::new();
+    let mut circuit_inits = Vec::<TokenStream>::new();
+    let mut public_input_terms = Vec::<TokenStream>::new();
+
+    let push_scalar = |name: &str,
+                       seen: &mut std::collections::BTreeSet<String>,
+                       scalar_parses: &mut Vec<TokenStream>,
+                       circuit_inits: &mut Vec<TokenStream>| {
+        if seen.insert(name.to_string()) {
+            let ident = format_ident!("{}", name);
+            let label = name.to_string();
+            scalar_parses.push(quote! {
+                let #ident = parse_field(&w.#ident).map_err(|e| match e {
+                    CircuitError::InvalidWitness(msg) => {
+                        CircuitError::InvalidWitness(format!("{}: {}", #label, msg))
+                    }
+                    other => other,
+                })?;
+            });
+            circuit_inits.push(quote! { #ident: Value::known(#ident) });
+        }
+    };
+    let push_vec = |name: &str,
+                    seen: &mut std::collections::BTreeSet<String>,
+                    vec_parses: &mut Vec<TokenStream>,
+                    circuit_inits: &mut Vec<TokenStream>| {
+        if seen.insert(name.to_string()) {
+            let ident = format_ident!("{}", name);
+            vec_parses.push(quote! {
+                let #ident: Vec<Fp> = w.#ident.iter()
+                    .map(|s| parse_field(s))
+                    .collect::<CResult<_>>()?;
+            });
+            circuit_inits.push(quote! {
+                #ident: #ident.iter().map(|v| Value::known(*v)).collect()
+            });
+        }
+    };
+
+    for attr in attrs {
+        push_scalar(&attr.param_name, &mut seen, &mut scalar_parses, &mut circuit_inits);
+        for b in &attr.bindings {
+            match b {
+                GadgetBinding::PoseidonCommit { nonce_var } => {
+                    push_scalar(nonce_var, &mut seen, &mut scalar_parses, &mut circuit_inits);
+                    let value_ident = format_ident!("{}", attr.param_name);
+                    let nonce_ident = format_ident!("{}", nonce_var);
+                    let commitment_ident = format_ident!("{}_commitment", attr.param_name);
+                    commitments.push(quote! {
+                        let #commitment_ident = PoseidonCommitmentChip::hash_outside_circuit(
+                            #value_ident,
+                            #nonce_ident,
+                        );
+                    });
+                    public_input_terms.push(quote! { #commitment_ident });
+                }
+                GadgetBinding::Comparison { other, .. } => {
+                    if is_simple_ident(other) {
+                        push_scalar(other, &mut seen, &mut scalar_parses, &mut circuit_inits);
+                    }
+                }
+                GadgetBinding::MerkleMember { root_var, siblings_var, indices_var, .. } => {
+                    push_scalar(root_var, &mut seen, &mut scalar_parses, &mut circuit_inits);
+                    push_vec(siblings_var, &mut seen, &mut vec_parses, &mut circuit_inits);
+                    push_vec(indices_var, &mut seen, &mut vec_parses, &mut circuit_inits);
+                }
+                GadgetBinding::Range { .. } => {}
+            }
+        }
+    }
+
+    let public_inputs_expr = if public_input_terms.is_empty() {
+        quote! { Vec::new() }
+    } else {
+        quote! { vec![vec![ #( #public_input_terms ),* ]] }
+    };
+
+    quote! {
+        #( #scalar_parses )*
+        #( #vec_parses )*
+        #( #commitments )*
+        let circuit = #circuit_ident {
+            #( #circuit_inits, )*
+        };
+        let public_inputs = #public_inputs_expr;
+        Ok(ParsedInputs { circuit, public_inputs })
+    }
 }
 
 fn count_witness_fields(attrs: &[ResolvedAttr]) -> usize {
@@ -1232,8 +1578,8 @@ mod tests {
         let src = emit_descriptor("foo", &attrs).unwrap();
         assert!(!src.contains("_commitment"));
         assert!(
-            src.contains("num_public_inputs (& self) -> usize { 0usize }")
-                || src.contains("num_public_inputs(&self) -> usize { 0usize }")
+            src.contains("NUM_PUBLIC_INPUTS : usize = 0usize")
+                || src.contains("NUM_PUBLIC_INPUTS: usize = 0usize")
         );
     }
 
@@ -1259,12 +1605,21 @@ mod tests {
     }
 
     #[test]
-    fn descriptor_methods_stubbed_with_error() {
+    fn descriptor_emits_full_prove_verify_mock_inspect_pipeline() {
         let attrs = vec![resolved("x", "u64", vec![AttrSpec::Commit(CommitScheme::Poseidon)])];
         let src = emit_descriptor("foo", &attrs).unwrap();
-        let stub_count = src.matches("CircuitError :: Other").count()
-            + src.matches("CircuitError::Other").count();
-        assert!(stub_count >= 4, "expected ≥4 stubbed methods, got {stub_count}");
+        assert!(src.contains("NativeProver"), "prove/verify should delegate to NativeProver");
+        assert!(src.contains("MockProver :: run") || src.contains("MockProver::run"));
+        assert!(
+            src.contains("ConstraintSystem :: < Fp >") || src.contains("ConstraintSystem::<Fp>")
+        );
+        assert!(src.contains("hash_outside_circuit"));
+        assert!(src.contains("WitnessJson"));
+        assert!(src.contains("ParsedInputs"));
+        assert!(src.contains("build_inputs"));
+        assert!(src.contains("parse_witness"));
+        assert!(src.contains("encode_public_inputs"));
+        assert!(src.contains("decode_public_inputs"));
     }
 
     #[test]
