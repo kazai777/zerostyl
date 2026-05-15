@@ -91,9 +91,40 @@ fn find_zk_private_fn(source: &str) -> Result<ItemFn> {
 }
 
 fn pretty(src: &str) -> Result<String> {
-    let file: syn::File = syn::parse_str(src)
-        .map_err(|e| ExporterError::Other(format!("generated code does not parse: {e}")))?;
-    Ok(prettyplease::unparse(&file))
+    format_rust(src)
+}
+
+pub fn format_rust(src: &str) -> Result<String> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    let mut child = Command::new("rustfmt")
+        .args(["--edition", "2021", "--emit", "stdout"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| ExporterError::Other(format!("rustfmt spawn: {e}")))?;
+
+    child
+        .stdin
+        .as_mut()
+        .ok_or_else(|| ExporterError::Other("rustfmt: missing stdin handle".into()))?
+        .write_all(src.as_bytes())
+        .map_err(|e| ExporterError::Other(format!("rustfmt stdin: {e}")))?;
+
+    let output =
+        child.wait_with_output().map_err(|e| ExporterError::Other(format!("rustfmt wait: {e}")))?;
+
+    if !output.status.success() {
+        return Err(ExporterError::Other(format!(
+            "rustfmt failed (status {}): {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        )));
+    }
+    String::from_utf8(output.stdout)
+        .map_err(|e| ExporterError::Other(format!("rustfmt output not UTF-8: {e}")))
 }
 
 fn write_file(path: &Path, content: &str) -> Result<()> {

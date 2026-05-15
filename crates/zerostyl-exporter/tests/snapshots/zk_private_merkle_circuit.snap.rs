@@ -5,7 +5,7 @@ use halo2_proofs::{
 };
 use halo2curves::pasta::Fp;
 use zerostyl_compiler::gadgets::{
-    PoseidonCommitmentChip, PoseidonCommitmentConfig, MerkleTreeChip, MerkleTreeConfig,
+    MerkleTreeChip, MerkleTreeConfig, PoseidonCommitmentChip, PoseidonCommitmentConfig,
 };
 pub const MERKLE_DEPTH: usize = 32;
 #[derive(Clone, Debug)]
@@ -44,11 +44,7 @@ impl Circuit<Fp> for ClaimCircuit {
         let merkle_config = MerkleTreeChip::configure(meta);
         let instance = meta.instance_column();
         meta.enable_equality(instance);
-        Self::Config {
-            poseidon_config,
-            merkle_config,
-            instance,
-        }
+        Self::Config { poseidon_config, merkle_config, instance }
     }
     fn synthesize(
         &self,
@@ -57,24 +53,21 @@ impl Circuit<Fp> for ClaimCircuit {
     ) -> std::result::Result<(), Error> {
         let poseidon_chip = PoseidonCommitmentChip::construct(config.poseidon_config);
         let merkle_chip = MerkleTreeChip::construct(config.merkle_config.clone());
-        let leaf_poseidon_value = poseidon_chip
-            .load_private(
-                layouter.namespace(|| "load leaf for poseidon"),
-                self.leaf,
-                0,
-            )?;
-        let leaf_poseidon_nonce = poseidon_chip
-            .load_private(
-                layouter.namespace(|| "load leaf_nonce for poseidon"),
-                self.leaf_nonce,
-                1,
-            )?;
-        let leaf_commitment = poseidon_chip
-            .commit(
-                layouter.namespace(|| "commit leaf"),
-                leaf_poseidon_value.clone(),
-                leaf_poseidon_nonce,
-            )?;
+        let leaf_poseidon_value = poseidon_chip.load_private(
+            layouter.namespace(|| "load leaf for poseidon"),
+            self.leaf,
+            0,
+        )?;
+        let leaf_poseidon_nonce = poseidon_chip.load_private(
+            layouter.namespace(|| "load leaf_nonce for poseidon"),
+            self.leaf_nonce,
+            1,
+        )?;
+        let leaf_commitment = poseidon_chip.commit(
+            layouter.namespace(|| "commit leaf"),
+            leaf_poseidon_value.clone(),
+            leaf_poseidon_nonce,
+        )?;
         let leaf_commitment_ref = leaf_commitment.cell();
         layouter.constrain_instance(leaf_commitment_ref, config.instance, 0usize)?;
         let leaf_sibling_cells: Vec<_> = self
@@ -82,14 +75,10 @@ impl Circuit<Fp> for ClaimCircuit {
             .iter()
             .enumerate()
             .map(|(i, s)| {
-                merkle_chip
-                    .load_sibling(
-                        layouter
-                            .namespace(|| {
-                                format!("{} {}", "load leaf merkle sibling", i)
-                            }),
-                        *s,
-                    )
+                merkle_chip.load_sibling(
+                    layouter.namespace(|| format!("{} {}", "load leaf merkle sibling", i)),
+                    *s,
+                )
             })
             .collect::<std::result::Result<Vec<_>, _>>()?;
         let leaf_index_cells: Vec<_> = self
@@ -97,21 +86,18 @@ impl Circuit<Fp> for ClaimCircuit {
             .iter()
             .enumerate()
             .map(|(i, idx)| {
-                merkle_chip
-                    .load_path_index(
-                        layouter
-                            .namespace(|| format!("{} {}", "load leaf merkle index", i)),
-                        *idx,
-                    )
+                merkle_chip.load_path_index(
+                    layouter.namespace(|| format!("{} {}", "load leaf merkle index", i)),
+                    *idx,
+                )
             })
             .collect::<std::result::Result<Vec<_>, _>>()?;
-        let leaf_computed_root = merkle_chip
-            .verify_membership(
-                layouter.namespace(|| "verify leaf merkle membership"),
-                leaf_commitment.clone(),
-                &leaf_sibling_cells,
-                &leaf_index_cells,
-            )?;
+        let leaf_computed_root = merkle_chip.verify_membership(
+            layouter.namespace(|| "verify leaf merkle membership"),
+            leaf_commitment.clone(),
+            &leaf_sibling_cells,
+            &leaf_index_cells,
+        )?;
         Ok(())
     }
 }

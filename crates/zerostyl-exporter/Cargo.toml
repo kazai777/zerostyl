@@ -23,7 +23,6 @@ clap = { version = "4.5", features = ["derive"] }
 syn = { version = "2.0", features = ["full", "parsing"] }
 quote = "1.0"
 proc-macro2 = "1.0"
-prettyplease = "0.2"
 
 [dev-dependencies]
 tempfile = "3.0"

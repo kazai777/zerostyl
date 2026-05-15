@@ -22,5 +22,5 @@ pub use schema::{
     AbiSchema, CircuitMetadata, OnChainBinding, ProofMetadata, ProvingSystem, PublicInputsSchema,
     WitnessSchema,
 };
-pub use transform::{transform_contract, TransformReport};
+pub use transform::{format_rust, transform_contract, TransformReport};
 pub use version::ABI_VERSION;

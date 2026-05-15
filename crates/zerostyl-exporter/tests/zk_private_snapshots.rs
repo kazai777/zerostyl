@@ -6,8 +6,8 @@ use std::path::PathBuf;
 
 use syn::ItemFn;
 use zerostyl_exporter::{
-    emit_abi_json, emit_circuit, emit_descriptor, emit_transformed_contract, parser::parse_fn,
-    resolver::resolve_all,
+    emit_abi_json, emit_circuit, emit_descriptor, emit_transformed_contract, format_rust,
+    parser::parse_fn, resolver::resolve_all,
 };
 
 fn fixtures_dir() -> PathBuf {
@@ -19,8 +19,7 @@ fn snapshots_dir() -> PathBuf {
 }
 
 fn pretty(src: &str) -> String {
-    let file: syn::File = syn::parse_str(src).expect("emit_* output must parse as a Rust file");
-    prettyplease::unparse(&file)
+    format_rust(src).expect("rustfmt succeeds on emit_* output")
 }
 
 fn extract_fn(source: &str) -> ItemFn {
