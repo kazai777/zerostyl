@@ -16,8 +16,8 @@ pub enum GadgetBinding {
     Range { low: String, high: String, inclusive: bool, num_bits: usize },
     /// `ComparisonChip::assert_<op>(value, other, num_bits)`
     Comparison { op: ComparisonOp, other: String, num_bits: usize },
-    /// `MerkleTreeChip::verify_membership(value, root_var, siblings_var, depth)`
-    MerkleMember { root_var: String, siblings_var: String, depth: usize },
+    /// `MerkleTreeChip::verify_membership(value, root_var, siblings_var, indices_var, depth)`
+    MerkleMember { root_var: String, siblings_var: String, indices_var: String, depth: usize },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,6 +67,7 @@ fn resolve_spec(spec: &AttrSpec, param_name: &str, num_bits: usize) -> GadgetBin
         AttrSpec::MerkleMember(m) => GadgetBinding::MerkleMember {
             root_var: m.root_var.clone(),
             siblings_var: m.siblings_var.clone(),
+            indices_var: m.indices_var.clone(),
             depth: MERKLE_DEPTH,
         },
     }
@@ -201,6 +202,7 @@ mod tests {
             vec![AttrSpec::MerkleMember(MerkleMemberSpec {
                 root_var: "root".into(),
                 siblings_var: "siblings".into(),
+                indices_var: "indices".into(),
             })],
         );
         let r = resolve(&a).unwrap();
@@ -209,6 +211,7 @@ mod tests {
             GadgetBinding::MerkleMember {
                 root_var: "root".into(),
                 siblings_var: "siblings".into(),
+                indices_var: "indices".into(),
                 depth: 32,
             }
         );

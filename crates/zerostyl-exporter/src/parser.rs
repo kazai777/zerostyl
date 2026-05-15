@@ -43,6 +43,7 @@ pub enum Constraint {
 pub struct MerkleMemberSpec {
     pub root_var: String,
     pub siblings_var: String,
+    pub indices_var: String,
 }
 
 pub fn parse_fn(item_fn: &ItemFn) -> Result<Vec<ZkPrivateAttr>> {
@@ -182,9 +183,9 @@ fn parse_merkle_member(raw: &str) -> Result<MerkleMemberSpec> {
             "expected 'merkle_member' function, got '{func_name}'"
         )));
     }
-    if expr.args.len() != 3 {
+    if expr.args.len() != 4 {
         return Err(ExporterError::Parse(format!(
-            "merkle_member expects 3 args (value, root, siblings); got {}",
+            "merkle_member expects 4 args (value, root, siblings, indices); got {}",
             expr.args.len()
         )));
     }
@@ -195,7 +196,11 @@ fn parse_merkle_member(raw: &str) -> Result<MerkleMemberSpec> {
             args[0]
         )));
     }
-    Ok(MerkleMemberSpec { root_var: args[1].clone(), siblings_var: args[2].clone() })
+    Ok(MerkleMemberSpec {
+        root_var: args[1].clone(),
+        siblings_var: args[2].clone(),
+        indices_var: args[3].clone(),
+    })
 }
 
 #[cfg(test)]
@@ -346,7 +351,7 @@ mod tests {
         let item = parse_item(
             r#"
                 fn foo(
-                    #[zk_private(constraint = "merkle_member(value, root, siblings)")]
+                    #[zk_private(constraint = "merkle_member(value, root, siblings, indices)")]
                     x: u64,
                 ) {}
             "#,
@@ -357,6 +362,7 @@ mod tests {
             AttrSpec::MerkleMember(MerkleMemberSpec {
                 root_var: "root".into(),
                 siblings_var: "siblings".into(),
+                indices_var: "indices".into(),
             })
         );
     }
@@ -366,7 +372,7 @@ mod tests {
         let item = parse_item(
             r#"
                 fn foo(
-                    #[zk_private(constraint = "merkle_member(other, root, siblings)")]
+                    #[zk_private(constraint = "merkle_member(other, root, siblings, indices)")]
                     x: u64,
                 ) {}
             "#,
@@ -380,13 +386,13 @@ mod tests {
         let item = parse_item(
             r#"
                 fn foo(
-                    #[zk_private(constraint = "merkle_member(value, root)")]
+                    #[zk_private(constraint = "merkle_member(value, root, siblings)")]
                     x: u64,
                 ) {}
             "#,
         );
         let err = parse_fn(&item).unwrap_err();
-        assert!(format!("{err}").contains("3"));
+        assert!(format!("{err}").contains("4"));
     }
 
     #[test]

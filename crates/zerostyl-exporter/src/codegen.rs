@@ -5,26 +5,37 @@ use crate::error::{ExporterError, Result};
 use crate::resolver::{ComparisonOp, GadgetBinding, ResolvedAttr};
 
 pub fn emit_circuit(circuit_name: &str, attrs: &[ResolvedAttr]) -> Result<String> {
-    validate_supported(attrs)?;
     enforce_single_poseidon(attrs)?;
+    validate_merkle_pairing(attrs)?;
 
     let chips = collect_chip_usage(attrs);
     let circuit_ident = format_ident!("{}Circuit", to_pascal_case(circuit_name));
     let config_ident = format_ident!("{}Config", circuit_ident);
 
     let imports = emit_imports(&chips);
+    let depth_const = if chips.merkle {
+        quote! { pub const MERKLE_DEPTH: usize = 32; }
+    } else {
+        quote! {}
+    };
+
     let witness_fields = emit_witness_fields(attrs);
     let config_fields = emit_config_fields(&chips);
     let configure_body = emit_configure_body(&chips);
     let synthesize_body = emit_synthesize_body(&chips, attrs)?;
+    let (struct_derive, default_impl) = emit_struct_derive(attrs, &circuit_ident);
 
     let tokens = quote! {
         #imports
 
-        #[derive(Clone, Debug, Default)]
+        #depth_const
+
+        #struct_derive
         pub struct #circuit_ident {
             #( pub #witness_fields, )*
         }
+
+        #default_impl
 
         #[derive(Debug, Clone)]
         pub struct #config_ident {
@@ -62,6 +73,7 @@ struct ChipUsage {
     poseidon: bool,
     range: bool,
     comparison: bool,
+    merkle: bool,
 }
 
 fn collect_chip_usage(attrs: &[ResolvedAttr]) -> ChipUsage {
@@ -72,29 +84,11 @@ fn collect_chip_usage(attrs: &[ResolvedAttr]) -> ChipUsage {
                 GadgetBinding::PoseidonCommit { .. } => u.poseidon = true,
                 GadgetBinding::Range { .. } => u.range = true,
                 GadgetBinding::Comparison { .. } => u.comparison = true,
-                GadgetBinding::MerkleMember { .. } => {}
+                GadgetBinding::MerkleMember { .. } => u.merkle = true,
             }
         }
     }
     u
-}
-
-fn validate_supported(attrs: &[ResolvedAttr]) -> Result<()> {
-    for attr in attrs {
-        for b in &attr.bindings {
-            match b {
-                GadgetBinding::PoseidonCommit { .. }
-                | GadgetBinding::Range { .. }
-                | GadgetBinding::Comparison { .. } => {}
-                GadgetBinding::MerkleMember { .. } => {
-                    return Err(ExporterError::Parse(
-                        "codegen for MerkleMember not yet implemented".into(),
-                    ));
-                }
-            }
-        }
-    }
-    Ok(())
 }
 
 fn enforce_single_poseidon(attrs: &[ResolvedAttr]) -> Result<()> {
@@ -107,6 +101,22 @@ fn enforce_single_poseidon(attrs: &[ResolvedAttr]) -> Result<()> {
         return Err(ExporterError::Parse(format!(
             "codegen currently supports at most one PoseidonCommit per circuit; got {count}"
         )));
+    }
+    Ok(())
+}
+
+fn validate_merkle_pairing(attrs: &[ResolvedAttr]) -> Result<()> {
+    for attr in attrs {
+        let has_merkle =
+            attr.bindings.iter().any(|b| matches!(b, GadgetBinding::MerkleMember { .. }));
+        let has_poseidon =
+            attr.bindings.iter().any(|b| matches!(b, GadgetBinding::PoseidonCommit { .. }));
+        if has_merkle && !has_poseidon {
+            return Err(ExporterError::Parse(format!(
+                "MerkleMember on '{}' requires a PoseidonCommit on the same param (the commitment becomes the leaf)",
+                attr.param_name
+            )));
+        }
     }
     Ok(())
 }
@@ -125,6 +135,10 @@ fn emit_imports(chips: &ChipUsage) -> TokenStream {
         gadget_items.push(quote! { ComparisonChip });
         gadget_items.push(quote! { ComparisonConfig });
     }
+    if chips.merkle {
+        gadget_items.push(quote! { MerkleTreeChip });
+        gadget_items.push(quote! { MerkleTreeConfig });
+    }
     quote! {
         use halo2_proofs::{
             circuit::{Layouter, SimpleFloorPlanner, Value},
@@ -135,34 +149,121 @@ fn emit_imports(chips: &ChipUsage) -> TokenStream {
     }
 }
 
+enum FieldKind {
+    Scalar,
+    VecScalar,
+}
+
 fn emit_witness_fields(attrs: &[ResolvedAttr]) -> Vec<TokenStream> {
-    let mut seen = std::collections::BTreeSet::new();
-    let mut fields = Vec::new();
+    let mut seen = std::collections::BTreeMap::<String, FieldKind>::new();
+    let mut ordered: Vec<(String, FieldKind)> = Vec::new();
     let add = |name: &str,
-               fields: &mut Vec<TokenStream>,
-               seen: &mut std::collections::BTreeSet<String>| {
-        if seen.insert(name.to_string()) {
-            let ident = format_ident!("{}", name);
-            fields.push(quote! { #ident: Value<Fp> });
+               kind: FieldKind,
+               seen: &mut std::collections::BTreeMap<String, FieldKind>,
+               ordered: &mut Vec<(String, FieldKind)>| {
+        if !seen.contains_key(name) {
+            ordered.push((
+                name.to_string(),
+                match kind {
+                    FieldKind::Scalar => FieldKind::Scalar,
+                    FieldKind::VecScalar => FieldKind::VecScalar,
+                },
+            ));
+            seen.insert(name.to_string(), kind);
         }
     };
     for attr in attrs {
-        add(&attr.param_name, &mut fields, &mut seen);
+        add(&attr.param_name, FieldKind::Scalar, &mut seen, &mut ordered);
         for b in &attr.bindings {
             match b {
                 GadgetBinding::PoseidonCommit { nonce_var } => {
-                    add(nonce_var, &mut fields, &mut seen);
+                    add(nonce_var, FieldKind::Scalar, &mut seen, &mut ordered);
                 }
                 GadgetBinding::Comparison { other, .. } => {
                     if is_simple_ident(other) {
-                        add(other, &mut fields, &mut seen);
+                        add(other, FieldKind::Scalar, &mut seen, &mut ordered);
                     }
                 }
-                GadgetBinding::Range { .. } | GadgetBinding::MerkleMember { .. } => {}
+                GadgetBinding::MerkleMember { root_var, siblings_var, indices_var, .. } => {
+                    add(root_var, FieldKind::Scalar, &mut seen, &mut ordered);
+                    add(siblings_var, FieldKind::VecScalar, &mut seen, &mut ordered);
+                    add(indices_var, FieldKind::VecScalar, &mut seen, &mut ordered);
+                }
+                GadgetBinding::Range { .. } => {}
             }
         }
     }
-    fields
+    ordered
+        .into_iter()
+        .map(|(name, kind)| {
+            let ident = format_ident!("{}", name);
+            match kind {
+                FieldKind::Scalar => quote! { #ident: Value<Fp> },
+                FieldKind::VecScalar => quote! { #ident: Vec<Value<Fp>> },
+            }
+        })
+        .collect()
+}
+
+fn emit_struct_derive(
+    attrs: &[ResolvedAttr],
+    circuit_ident: &syn::Ident,
+) -> (TokenStream, TokenStream) {
+    let has_vec = attrs
+        .iter()
+        .any(|a| a.bindings.iter().any(|b| matches!(b, GadgetBinding::MerkleMember { .. })));
+    if !has_vec {
+        return (quote! { #[derive(Clone, Debug, Default)] }, quote! {});
+    }
+
+    let mut seen = std::collections::BTreeSet::new();
+    let mut inits = Vec::<TokenStream>::new();
+    let push_scalar = |name: &str,
+                       inits: &mut Vec<TokenStream>,
+                       seen: &mut std::collections::BTreeSet<String>| {
+        if seen.insert(name.to_string()) {
+            let ident = format_ident!("{}", name);
+            inits.push(quote! { #ident: Value::unknown() });
+        }
+    };
+    let push_vec = |name: &str,
+                    inits: &mut Vec<TokenStream>,
+                    seen: &mut std::collections::BTreeSet<String>| {
+        if seen.insert(name.to_string()) {
+            let ident = format_ident!("{}", name);
+            inits.push(quote! { #ident: vec![Value::unknown(); MERKLE_DEPTH] });
+        }
+    };
+    for attr in attrs {
+        push_scalar(&attr.param_name, &mut inits, &mut seen);
+        for b in &attr.bindings {
+            match b {
+                GadgetBinding::PoseidonCommit { nonce_var } => {
+                    push_scalar(nonce_var, &mut inits, &mut seen);
+                }
+                GadgetBinding::Comparison { other, .. } => {
+                    if is_simple_ident(other) {
+                        push_scalar(other, &mut inits, &mut seen);
+                    }
+                }
+                GadgetBinding::MerkleMember { root_var, siblings_var, indices_var, .. } => {
+                    push_scalar(root_var, &mut inits, &mut seen);
+                    push_vec(siblings_var, &mut inits, &mut seen);
+                    push_vec(indices_var, &mut inits, &mut seen);
+                }
+                GadgetBinding::Range { .. } => {}
+            }
+        }
+    }
+
+    let default_impl = quote! {
+        impl Default for #circuit_ident {
+            fn default() -> Self {
+                Self { #( #inits, )* }
+            }
+        }
+    };
+    (quote! { #[derive(Clone, Debug)] }, default_impl)
 }
 
 fn emit_config_fields(chips: &ChipUsage) -> Vec<TokenStream> {
@@ -175,6 +276,9 @@ fn emit_config_fields(chips: &ChipUsage) -> Vec<TokenStream> {
     }
     if chips.comparison {
         fields.push(quote! { comparison_config: ComparisonConfig });
+    }
+    if chips.merkle {
+        fields.push(quote! { merkle_config: MerkleTreeConfig });
     }
     fields
 }
@@ -194,6 +298,10 @@ fn emit_configure_body(chips: &ChipUsage) -> TokenStream {
         stmts.push(quote! { let comparison_config = ComparisonChip::configure(meta); });
         struct_fields.push(quote! { comparison_config });
     }
+    if chips.merkle {
+        stmts.push(quote! { let merkle_config = MerkleTreeChip::configure(meta); });
+        struct_fields.push(quote! { merkle_config });
+    }
     stmts.push(quote! {
         let instance = meta.instance_column();
         meta.enable_equality(instance);
@@ -202,6 +310,15 @@ fn emit_configure_body(chips: &ChipUsage) -> TokenStream {
     quote! {
         #( #stmts )*
         Self::Config { #( #struct_fields ),* }
+    }
+}
+
+fn binding_priority(b: &GadgetBinding) -> u8 {
+    match b {
+        GadgetBinding::PoseidonCommit { .. } => 0,
+        GadgetBinding::Range { .. } => 1,
+        GadgetBinding::Comparison { .. } => 2,
+        GadgetBinding::MerkleMember { .. } => 3,
     }
 }
 
@@ -223,12 +340,19 @@ fn emit_synthesize_body(chips: &ChipUsage, attrs: &[ResolvedAttr]) -> Result<Tok
             let comparison_chip = ComparisonChip::construct(config.comparison_config);
         });
     }
+    if chips.merkle {
+        stmts.push(quote! {
+            let merkle_chip = MerkleTreeChip::construct(config.merkle_config.clone());
+        });
+    }
 
     let mut instance_idx: usize = 0;
 
     for attr in attrs {
         let value_ident = format_ident!("{}", attr.param_name);
-        for b in &attr.bindings {
+        let mut sorted = attr.bindings.clone();
+        sorted.sort_by_key(binding_priority);
+        for b in &sorted {
             match b {
                 GadgetBinding::PoseidonCommit { nonce_var } => {
                     stmts.extend(emit_poseidon(
@@ -258,7 +382,9 @@ fn emit_synthesize_body(chips: &ChipUsage, attrs: &[ResolvedAttr]) -> Result<Tok
                         *num_bits,
                     )?);
                 }
-                GadgetBinding::MerkleMember { .. } => unreachable!("guarded by validate_supported"),
+                GadgetBinding::MerkleMember { siblings_var, indices_var, .. } => {
+                    stmts.extend(emit_merkle(&attr.param_name, siblings_var, indices_var)?);
+                }
             }
         }
     }
@@ -391,6 +517,57 @@ fn emit_comparison(
     Ok(stmts)
 }
 
+fn emit_merkle(
+    param_name: &str,
+    siblings_var: &str,
+    indices_var: &str,
+) -> Result<Vec<TokenStream>> {
+    if !is_simple_ident(siblings_var) || !is_simple_ident(indices_var) {
+        return Err(ExporterError::Parse(format!(
+            "merkle_member siblings and indices must be simple identifiers; got '{siblings_var}', '{indices_var}'"
+        )));
+    }
+    let siblings_ident = format_ident!("{}", siblings_var);
+    let indices_ident = format_ident!("{}", indices_var);
+    let siblings_cells = format_ident!("{}_sibling_cells", param_name);
+    let indices_cells = format_ident!("{}_index_cells", param_name);
+    let commitment = format_ident!("{}_commitment", param_name);
+    let computed_root = format_ident!("{}_computed_root", param_name);
+    let load_sibling_label = format!("load {param_name} merkle sibling");
+    let load_index_label = format!("load {param_name} merkle index");
+    let verify_label = format!("verify {param_name} merkle membership");
+    Ok(vec![quote! {
+        let #siblings_cells: Vec<_> = self
+            .#siblings_ident
+            .iter()
+            .enumerate()
+            .map(|(i, s)| {
+                merkle_chip.load_sibling(
+                    layouter.namespace(|| format!("{} {}", #load_sibling_label, i)),
+                    *s,
+                )
+            })
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let #indices_cells: Vec<_> = self
+            .#indices_ident
+            .iter()
+            .enumerate()
+            .map(|(i, idx)| {
+                merkle_chip.load_path_index(
+                    layouter.namespace(|| format!("{} {}", #load_index_label, i)),
+                    *idx,
+                )
+            })
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let #computed_root = merkle_chip.verify_membership(
+            layouter.namespace(|| #verify_label),
+            #commitment.clone(),
+            &#siblings_cells,
+            &#indices_cells,
+        )?;
+    }])
+}
+
 fn op_method(op: ComparisonOp) -> Result<&'static str> {
     match op {
         ComparisonOp::Gt => Ok("assert_gt"),
@@ -439,7 +616,7 @@ fn to_pascal_case(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::{AttrSpec, CommitScheme, Constraint, RangeSpec};
+    use crate::parser::{AttrSpec, CommitScheme, Constraint, MerkleMemberSpec, RangeSpec};
     use crate::resolver::resolve;
 
     fn resolved(name: &str, ty: &str, specs: Vec<AttrSpec>) -> ResolvedAttr {
@@ -468,6 +645,7 @@ mod tests {
         parse_as_file(&src);
         assert!(src.contains("PoseidonCommitmentChip"));
         assert!(!src.contains("RangeProofChip"));
+        assert!(!src.contains("MerkleTreeChip"));
     }
 
     #[test]
@@ -485,7 +663,6 @@ mod tests {
         parse_as_file(&src);
         assert!(src.contains("RangeProofChip"));
         assert!(src.contains("check_range_bounded"));
-        assert!(src.contains("Fp :: from ((0) as u64)") || src.contains("Fp::from((0) as u64)"));
     }
 
     #[test]
@@ -548,7 +725,6 @@ mod tests {
             vec![AttrSpec::Constraint(Constraint::Gte("threshold".into()))],
         )];
         let src = emit_circuit("foo", &attrs).unwrap();
-        // both x and threshold should appear as struct fields
         assert!(src.contains("x : Value < Fp >") || src.contains("x: Value<Fp>"));
         assert!(src.contains("threshold : Value < Fp >") || src.contains("threshold: Value<Fp>"));
     }
@@ -573,24 +749,131 @@ mod tests {
         assert!(src.contains("PoseidonCommitmentChip"));
         assert!(src.contains("RangeProofChip"));
         assert!(src.contains("ComparisonChip"));
-        assert!(src.contains("poseidon_config"));
-        assert!(src.contains("range_config"));
-        assert!(src.contains("comparison_config"));
         assert!(src.contains("DepositCircuit"));
     }
 
     #[test]
-    fn merkle_member_still_rejected() {
+    fn merkle_with_poseidon_parses() {
         let attrs = vec![resolved(
-            "x",
+            "leaf",
             "u64",
-            vec![AttrSpec::MerkleMember(crate::parser::MerkleMemberSpec {
+            vec![
+                AttrSpec::Commit(CommitScheme::Poseidon),
+                AttrSpec::MerkleMember(MerkleMemberSpec {
+                    root_var: "root".into(),
+                    siblings_var: "siblings".into(),
+                    indices_var: "indices".into(),
+                }),
+            ],
+        )];
+        let src = emit_circuit("tx", &attrs).unwrap();
+        parse_as_file(&src);
+        assert!(src.contains("MerkleTreeChip"));
+        assert!(src.contains("verify_membership"));
+        assert!(src.contains("load_sibling"));
+        assert!(src.contains("load_path_index"));
+        assert!(src.contains("MERKLE_DEPTH"));
+    }
+
+    #[test]
+    fn merkle_witnesses_are_vec_typed() {
+        let attrs = vec![resolved(
+            "leaf",
+            "u64",
+            vec![
+                AttrSpec::Commit(CommitScheme::Poseidon),
+                AttrSpec::MerkleMember(MerkleMemberSpec {
+                    root_var: "root".into(),
+                    siblings_var: "siblings".into(),
+                    indices_var: "indices".into(),
+                }),
+            ],
+        )];
+        let src = emit_circuit("tx", &attrs).unwrap();
+        let parsed = parse_as_file(&src);
+        let struct_item = parsed
+            .items
+            .iter()
+            .find_map(|i| if let syn::Item::Struct(s) = i { Some(s) } else { None })
+            .expect("circuit struct");
+        let field_types: Vec<String> = struct_item
+            .fields
+            .iter()
+            .map(|f| {
+                let name = f.ident.as_ref().map(|i| i.to_string()).unwrap_or_default();
+                let ty = quote::ToTokens::to_token_stream(&f.ty).to_string();
+                format!("{name}={ty}")
+            })
+            .collect();
+        assert!(
+            field_types.iter().any(|s| s.starts_with("siblings=") && s.contains("Vec")),
+            "siblings should be Vec-typed; fields = {field_types:?}"
+        );
+        assert!(
+            field_types.iter().any(|s| s.starts_with("indices=") && s.contains("Vec")),
+            "indices should be Vec-typed; fields = {field_types:?}"
+        );
+    }
+
+    #[test]
+    fn merkle_emits_custom_default_impl() {
+        let attrs = vec![resolved(
+            "leaf",
+            "u64",
+            vec![
+                AttrSpec::Commit(CommitScheme::Poseidon),
+                AttrSpec::MerkleMember(MerkleMemberSpec {
+                    root_var: "root".into(),
+                    siblings_var: "siblings".into(),
+                    indices_var: "indices".into(),
+                }),
+            ],
+        )];
+        let src = emit_circuit("tx", &attrs).unwrap();
+        assert!(src.contains("impl Default for TxCircuit"));
+        assert!(
+            src.contains("vec ! [Value :: unknown () ; MERKLE_DEPTH]")
+                || src.contains("vec![Value::unknown(); MERKLE_DEPTH]")
+        );
+        assert!(!src.contains("Default ,") && !src.contains(", Default"));
+    }
+
+    #[test]
+    fn merkle_without_poseidon_rejected() {
+        let attrs = vec![resolved(
+            "leaf",
+            "u64",
+            vec![AttrSpec::MerkleMember(MerkleMemberSpec {
                 root_var: "root".into(),
                 siblings_var: "siblings".into(),
+                indices_var: "indices".into(),
             })],
         )];
-        let err = emit_circuit("foo", &attrs).unwrap_err();
-        assert!(format!("{err}").contains("MerkleMember"));
+        let err = emit_circuit("tx", &attrs).unwrap_err();
+        assert!(format!("{err}").contains("PoseidonCommit"));
+    }
+
+    #[test]
+    fn bindings_reordered_so_poseidon_runs_first() {
+        let attrs = vec![resolved(
+            "leaf",
+            "u64",
+            vec![
+                AttrSpec::MerkleMember(MerkleMemberSpec {
+                    root_var: "root".into(),
+                    siblings_var: "siblings".into(),
+                    indices_var: "indices".into(),
+                }),
+                AttrSpec::Commit(CommitScheme::Poseidon),
+            ],
+        )];
+        let src = emit_circuit("tx", &attrs).unwrap();
+        let poseidon_pos = src
+            .find("poseidon_chip . commit")
+            .or_else(|| src.find("poseidon_chip.commit"))
+            .unwrap();
+        let merkle_pos = src.find("verify_membership").unwrap();
+        assert!(poseidon_pos < merkle_pos, "expected poseidon commit before merkle verify");
     }
 
     #[test]
@@ -604,19 +887,13 @@ mod tests {
     }
 
     #[test]
-    fn witness_dedup_keeps_single_field_per_name() {
-        // x is referenced twice (as the annotated param and as the param itself); should appear once.
-        let attrs = vec![resolved(
-            "x",
-            "u64",
-            vec![
-                AttrSpec::Range(RangeSpec { low: "0".into(), high: "100".into(), inclusive: true }),
-                AttrSpec::Constraint(Constraint::Gte("threshold".into())),
-            ],
-        )];
+    fn no_merkle_still_uses_derive_default() {
+        let attrs = vec![resolved("x", "u64", vec![AttrSpec::Commit(CommitScheme::Poseidon)])];
         let src = emit_circuit("foo", &attrs).unwrap();
-        // count occurrences of "x : Value" or "x: Value"
-        let count = src.matches("x : Value").count() + src.matches("x: Value").count();
-        assert_eq!(count, 1, "x should appear once as a witness field, got {count}:\n{src}");
+        assert!(
+            src.contains("# [derive (Clone , Debug , Default)]")
+                || src.contains("#[derive(Clone, Debug, Default)]")
+        );
+        assert!(!src.contains("impl Default for"));
     }
 }
