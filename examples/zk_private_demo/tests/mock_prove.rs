@@ -1,6 +1,15 @@
+use zerostyl_circuits::{register_circuit, Registry};
 use zk_private_demo::descriptor;
 
 const K: u32 = 10;
+
+#[test]
+fn descriptor_registers_via_register_circuit_macro() {
+    let registry = Registry::new();
+    register_circuit!(registry, zk_private_demo).expect("register_circuit! succeeds");
+    let retrieved = registry.get("deposit").expect("descriptor must be retrievable by name");
+    assert_eq!(retrieved.name(), "deposit");
+}
 
 #[test]
 fn mock_prove_satisfied_with_valid_witness() {
