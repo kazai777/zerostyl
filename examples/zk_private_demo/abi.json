@@ -1,0 +1,50 @@
+{
+  "abi_version": 1,
+  "circuit": {
+    "name": "deposit",
+    "version": "1.0.0",
+    "description": "Auto-generated descriptor for the 'deposit' privacy-aware circuit.",
+    "default_k": 10,
+    "num_public_inputs": 1,
+    "num_private_witnesses": 3
+  },
+  "witness": {
+    "fields": [
+      {
+        "name": "collateral",
+        "kind": {
+          "type": "u64"
+        },
+        "visibility": "private"
+      },
+      {
+        "name": "collateral_nonce",
+        "kind": {
+          "type": "fp"
+        },
+        "visibility": "private"
+      },
+      {
+        "name": "threshold",
+        "kind": {
+          "type": "u64"
+        },
+        "visibility": "private"
+      }
+    ]
+  },
+  "public_inputs": {
+    "fields": [
+      {
+        "name": "collateral_commitment",
+        "kind": {
+          "type": "fp"
+        }
+      }
+    ]
+  },
+  "proof": {
+    "format_version": 1,
+    "proving_system": "halo2_ipa"
+  }
+}

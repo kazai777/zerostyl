@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use syn::ItemFn;
 use zerostyl_exporter::{
-    emit_circuit, emit_descriptor, emit_transformed_contract, parser::parse_fn,
+    emit_abi_json, emit_circuit, emit_descriptor, emit_transformed_contract, parser::parse_fn,
     resolver::resolve_all,
 };
 
@@ -31,6 +31,7 @@ fn e2e_zk_private_demo_sync() {
     let circuit_path = crate_root.join("src/circuit.rs");
     let descriptor_path = crate_root.join("src/descriptor.rs");
     let transformed_path = crate_root.join("src/contract_transformed.rs");
+    let abi_path = crate_root.join("abi.json");
 
     let source = fs::read_to_string(&source_path).expect("contract_source.rs readable");
     let item_fn: ItemFn = extract_fn(&source);
@@ -42,6 +43,7 @@ fn e2e_zk_private_demo_sync() {
     let descriptor_src = pretty(&emit_descriptor("deposit", &resolved).expect("emit_descriptor"));
     let transformed_src =
         pretty(&emit_transformed_contract(&item_fn).expect("emit_transformed_contract"));
+    let abi_json = format!("{}\n", emit_abi_json("deposit", &resolved).expect("emit_abi_json"));
 
     let circuit_full = format!("{HEADER}{circuit_src}");
     let descriptor_full = format!("{HEADER}{descriptor_src}");
@@ -51,6 +53,7 @@ fn e2e_zk_private_demo_sync() {
         fs::write(&circuit_path, &circuit_full).expect("write circuit.rs");
         fs::write(&descriptor_path, &descriptor_full).expect("write descriptor.rs");
         fs::write(&transformed_path, &transformed_full).expect("write contract_transformed.rs");
+        fs::write(&abi_path, &abi_json).expect("write abi.json");
         return;
     }
 
@@ -58,6 +61,7 @@ fn e2e_zk_private_demo_sync() {
     let on_disk_descriptor = fs::read_to_string(&descriptor_path).expect("descriptor.rs readable");
     let on_disk_transformed =
         fs::read_to_string(&transformed_path).expect("contract_transformed.rs readable");
+    let on_disk_abi = fs::read_to_string(&abi_path).expect("abi.json readable");
 
     assert_eq!(
         normalize(&on_disk_circuit),
@@ -73,6 +77,11 @@ fn e2e_zk_private_demo_sync() {
         normalize(&on_disk_transformed),
         normalize(&transformed_full),
         "examples/zk_private_demo/src/contract_transformed.rs is out of sync; run `REGEN_ZK_PRIVATE_DEMO=1 cargo test -p zerostyl-exporter e2e_zk_private_demo_sync`"
+    );
+    assert_eq!(
+        normalize(&on_disk_abi),
+        normalize(&abi_json),
+        "examples/zk_private_demo/abi.json is out of sync; run `REGEN_ZK_PRIVATE_DEMO=1 cargo test -p zerostyl-exporter e2e_zk_private_demo_sync`"
     );
 }
 

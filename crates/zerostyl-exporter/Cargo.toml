@@ -26,6 +26,7 @@ proc-macro2 = "1.0"
 
 [dev-dependencies]
 prettyplease = "0.2"
+zk_private_demo = { path = "../../examples/zk_private_demo" }
 
 [lib]
 name = "zerostyl_exporter"

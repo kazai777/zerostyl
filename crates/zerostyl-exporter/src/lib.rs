@@ -12,7 +12,7 @@ pub mod version;
 pub use cli::run;
 pub use codegen::{emit_circuit, emit_descriptor, emit_transformed_contract};
 pub use error::{ExporterError, Result};
-pub use extractor::from_descriptor;
+pub use extractor::{emit_abi_json, from_attrs, from_descriptor};
 pub use parser::{
     parse_fn, AttrSpec, CommitScheme, Constraint, MerkleMemberSpec, RangeSpec, ZkPrivateAttr,
 };
