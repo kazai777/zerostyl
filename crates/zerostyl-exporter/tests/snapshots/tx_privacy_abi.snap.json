@@ -1,0 +1,108 @@
+{
+  "abi_version": 1,
+  "circuit": {
+    "name": "tx_privacy",
+    "version": "1.0.0",
+    "description": "Private token transfer: balance conservation + Poseidon commitments + Merkle membership.",
+    "default_k": 14,
+    "num_public_inputs": 3,
+    "num_private_witnesses": 6
+  },
+  "witness": {
+    "fields": [
+      {
+        "name": "balance_old",
+        "kind": {
+          "type": "u64"
+        },
+        "visibility": "private",
+        "description": "Sender balance before the transfer."
+      },
+      {
+        "name": "balance_new",
+        "kind": {
+          "type": "u64"
+        },
+        "visibility": "private",
+        "description": "Sender balance after the transfer."
+      },
+      {
+        "name": "randomness_old",
+        "kind": {
+          "type": "fp"
+        },
+        "visibility": "private",
+        "description": "Commitment randomness for balance_old."
+      },
+      {
+        "name": "randomness_new",
+        "kind": {
+          "type": "fp"
+        },
+        "visibility": "private",
+        "description": "Commitment randomness for balance_new."
+      },
+      {
+        "name": "amount",
+        "kind": {
+          "type": "u64"
+        },
+        "visibility": "private",
+        "description": "Transfer amount; must equal balance_old - balance_new."
+      },
+      {
+        "name": "merkle_siblings",
+        "kind": {
+          "type": "array",
+          "kind": {
+            "type": "fp"
+          },
+          "len": 32
+        },
+        "visibility": "private",
+        "description": "Merkle authentication path siblings."
+      },
+      {
+        "name": "merkle_indices",
+        "kind": {
+          "type": "array",
+          "kind": {
+            "type": "bool"
+          },
+          "len": 32
+        },
+        "visibility": "private",
+        "description": "Merkle path direction bits (false=left, true=right)."
+      }
+    ]
+  },
+  "public_inputs": {
+    "fields": [
+      {
+        "name": "commitment_old",
+        "kind": {
+          "type": "fp"
+        },
+        "description": "Poseidon(balance_old, randomness_old)."
+      },
+      {
+        "name": "commitment_new",
+        "kind": {
+          "type": "fp"
+        },
+        "description": "Poseidon(balance_new, randomness_new)."
+      },
+      {
+        "name": "merkle_root",
+        "kind": {
+          "type": "fp"
+        },
+        "description": "Account-set Merkle root containing commitment_old."
+      }
+    ]
+  },
+  "proof": {
+    "format_version": 1,
+    "proving_system": "halo2_ipa"
+  }
+}

@@ -4,7 +4,6 @@
 //! The CLI and debugger consume circuits through a [`Registry`] populated at
 //! startup, so adding a new circuit never requires editing the dispatcher.
 
-pub mod abi;
 pub mod descriptor;
 pub mod error;
 pub mod macros;
@@ -13,7 +12,6 @@ pub mod registry;
 pub mod report;
 pub mod schema;
 
-pub use abi::AbiMetadata;
 pub use descriptor::CircuitDescriptor;
 pub use error::{CircuitError, Result};
 pub use proof::ProofArtifact;

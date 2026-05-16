@@ -1,8 +1,11 @@
 # Extending ZeroStyl with your own circuit
 
-ZeroStyl ships with four built-in circuits (`example`, `state_mask`, `tx_privacy`, `private_vote`). Adding your own takes about ten minutes if you already have a halo2 circuit handy.
+ZeroStyl ships with four built-in circuits (`example`, `state_mask`, `tx_privacy`, `private_vote`). There are two ways to add your own:
 
-The toolkit's CLI (`zerostyl-prove`), debugger (`zerostyl-debug`), and — soon — the ABI exporter and SDK generators all consume circuits through a single trait: [`CircuitDescriptor`](../crates/zerostyl-circuits/src/descriptor.rs). Implement that trait once, hand the resulting `&'static dyn CircuitDescriptor` to a `Registry`, and your circuit is wired into every tool.
+1. **`#[zk_private]` annotations** — write a Stylus contract with declarative privacy attributes on the params you want to hide; `zerostyl-export transform` generates the halo2 circuit, the descriptor, the privacy-safe ABI, and an `abi.json` schema in one shot. Best when your circuit fits the supported attribute matrix (commit / range / constraint / merkle_member). See [Faster path: `#[zk_private]` annotations](#faster-path-zk_private-annotations).
+2. **Manual descriptor** — write the halo2 circuit by hand and implement `CircuitDescriptor` directly. Use this when your constraints don't fit the supported attributes (custom gates, non-standard chip composition).
+
+Both paths produce a `&'static dyn CircuitDescriptor` registered the same way, so the CLI, the debugger, and the ABI/SDK tooling consume them identically.
 
 ---
 
@@ -164,7 +167,94 @@ Once your descriptor compiles, you immediately get:
 | Failure diagnostics | `zerostyl-debug debug --circuit my_circuit --witnesses w.json` | calls `descriptor.mock_prove(...)` |
 | Witness preview | `zerostyl-debug witness --circuit my_circuit --witnesses w.json` | reads `witness_schema()` |
 
-Coming next (M3 bloc A and B): the ABI exporter will produce a privacy-safe Solidity/Stylus ABI from your `witness_schema()` and `public_inputs_schema()`, and the SDK generators will emit TypeScript / Rust / Python clients targeting that ABI.
+In addition, `zerostyl-export schema --circuit my_circuit` serializes your descriptor to the canonical `AbiSchema` JSON format — the same format the SDK generators (TypeScript, Rust, Python) consume to emit client code targeting your circuit's privacy-safe ABI.
+
+---
+
+## Faster path: `#[zk_private]` annotations
+
+Instead of writing the halo2 circuit by hand, annotate the params you want to hide on your Stylus function. `zerostyl-export transform` parses the source, composes a halo2 circuit from the M1 gadgets (Poseidon, range, comparison, Merkle), and writes four artifacts in one shot.
+
+### Supported attributes
+
+Each `#[zk_private(...)]` attribute key maps to a specific gadget. You can declare multiple attributes on the same parameter; they compose as a logical AND inside the circuit.
+
+| Attribute | Effect | Gadget |
+|---|---|---|
+| `commit = "poseidon"` | Replace the raw value with `Poseidon(value, nonce)` as a public input | `PoseidonCommitmentChip` |
+| `range = "a..b"` / `range = "a..=b"` | Prove `a <= value < b` (or `<=`) | `RangeProofChip` |
+| `constraint = "value >= other"` | Prove a comparison against another fn param | `ComparisonChip` (`>=`, `>`, `<=`, `<`) |
+| `constraint = "merkle_member(value, root, siblings, indices)"` | Prove membership in a depth-32 Merkle tree | `MerkleTreeChip` |
+
+Supported param types: `u8`, `u16`, `u32`, `u64`, `u128`, `bool`, `U256`. Other types require the manual path.
+
+### Worked example
+
+The source contract:
+
+```rust
+// contract_source.rs
+pub fn deposit(
+    #[zk_private(
+        commit = "poseidon",
+        range = "0..1000000",
+        constraint = "value >= threshold"
+    )]
+    collateral: u64,
+    threshold: u64,
+) -> bool {
+    let _ = (collateral, threshold);
+    true
+}
+```
+
+Run the transform:
+
+```bash
+zerostyl-export transform --contract contract_source.rs
+```
+
+You get four artifacts in `./generated/`:
+
+- **`circuit.rs`** — a halo2 `Circuit<Fp>` impl that wires `PoseidonCommitmentChip`, `RangeProofChip`, and `ComparisonChip` according to the attributes. Witnesses: `collateral`, `collateral_nonce`, `threshold`.
+- **`descriptor.rs`** — a `CircuitDescriptor` impl with `prove` / `verify` / `mock_prove` / `inspect` implemented against `NativeProver` and `MockProver`. Also re-exposes `pub fn descriptor() -> &'static dyn CircuitDescriptor` so it slots into `register_circuit!`.
+- **`contract_transformed.rs`** — the privacy-safe ABI:
+  ```rust
+  pub fn deposit(collateral_commitment: B256, threshold: u64, proof: Bytes) -> bool {
+      todo!()  // verifier wiring lands with the universal on-chain verifier
+  }
+  ```
+- **`abi.json`** — the canonical `AbiSchema` describing the witness fields, public inputs, and proof metadata. Same shape SDK generators consume.
+
+### Integrating the generated artifacts
+
+Drop the four files into a Cargo crate, expose `pub fn descriptor()` at the crate root, and register it:
+
+```rust
+// my_demo/src/lib.rs
+pub mod circuit;
+pub mod contract_transformed;
+pub mod descriptor;
+pub use descriptor::descriptor;
+```
+
+```rust
+// main.rs (or wherever your tool lives)
+use zerostyl_circuits::{register_circuit, Registry};
+
+let registry = Registry::new();
+register_circuit!(registry, my_demo)?;
+```
+
+The end-to-end reference is [`examples/zk_private_demo/`](../examples/zk_private_demo) — `contract_source.rs` + generated artifacts + a `tests/mock_prove.rs` that exercises the full pipeline.
+
+### Limitations
+
+- **One `commit = "poseidon"` per circuit.** The chip column layout doesn't accommodate multiple commits cleanly yet. Split into separate circuits if you need more than one.
+- **MerkleMember requires a Poseidon commit on the same param.** The tree leaf is the commitment.
+- **Equality comparison is not exposed** by `ComparisonChip`. Use a different gadget (or the manual path) when you need `value == other`.
+- **No body inference.** ZeroStyl reads only the attribute declarations — the function body is ignored. Anything not expressible via the supported attributes requires the manual path.
+- **The generated `contract_transformed.rs` body is `todo!()`.** Universal on-chain verifier wiring lands in a later milestone; until then, the transformed ABI is a stub.
 
 ---
 

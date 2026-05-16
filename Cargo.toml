@@ -12,6 +12,7 @@ members = [
     "examples/tx_privacy",
     "examples/state_mask",
     "examples/private_vote",
+    "examples/zk_private_demo",
     "benchmarks/debug-workflow",
 ]
 
