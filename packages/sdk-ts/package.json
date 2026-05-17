@@ -26,7 +26,11 @@
       "import": "./dist/index.js"
     }
   },
+  "bin": {
+    "zerostyl-sdk": "./bin/zerostyl-sdk.js"
+  },
   "files": [
+    "bin",
     "dist",
     "README.md",
     "LICENSE"
