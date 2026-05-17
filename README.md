@@ -138,6 +138,24 @@ ZeroStyl is plug-in by design: implement the `CircuitDescriptor` trait, register
 
 ---
 
+## TypeScript SDK
+
+`@zerostyl/sdk-ts` (in [`packages/sdk-ts/`](packages/sdk-ts/)) turns a circuit's `abi.json` into a typed TypeScript module your dApp can import.
+
+The package isn't on npm yet — use it from a clone of this monorepo for now:
+
+```bash
+pnpm install
+pnpm --filter @zerostyl/sdk-ts build
+node packages/sdk-ts/bin/zerostyl-sdk.js generate \
+  --abi examples/zk_private_demo/abi.json \
+  --out /tmp/circuit.ts
+```
+
+The npm publish workflow + the WASM bundle of the prover + on-chain submission helpers land in subsequent releases. See [`packages/sdk-ts/README.md`](packages/sdk-ts/README.md) for the full reference and roadmap.
+
+---
+
 ## Contributing
 
 Contributions are welcome. See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) before opening a pull request.

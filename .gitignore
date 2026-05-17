@@ -8,3 +8,9 @@ Cargo.lock
 .zerostyl_cache/
 proof.bin
 public_inputs.json
+
+# Node / pnpm
+node_modules/
+packages/**/dist/
+pnpm-debug.log
+.pnpm-store/
