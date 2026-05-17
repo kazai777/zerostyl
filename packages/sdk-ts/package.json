@@ -1,0 +1,51 @@
+{
+  "name": "@zerostyl/sdk-ts",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for the ZeroStyl zk toolkit on Arbitrum Stylus",
+  "license": "MIT",
+  "author": "kazai777 <kazai777.dev@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kazai777/zerostyl.git",
+    "directory": "packages/sdk-ts"
+  },
+  "keywords": [
+    "arbitrum",
+    "stylus",
+    "zero-knowledge",
+    "privacy",
+    "zk-snarks",
+    "halo2"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "biome check src tests",
+    "format": "biome format --write src tests",
+    "clean": "rm -rf dist"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}
