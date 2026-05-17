@@ -14,7 +14,9 @@ pub mod schema;
 
 pub use descriptor::CircuitDescriptor;
 pub use error::{CircuitError, Result};
-pub use proof::ProofArtifact;
+pub use proof::{
+    CanonicalProof, ProofArtifact, ProofFormatError, PROOF_HEADER_LEN, PROOF_MAGIC, PROOF_VERSION,
+};
 pub use registry::Registry;
 pub use report::{
     CircuitIntrospection, ColumnInfo, FailureEntry, FailureKind, GateInfo, MockProverReport,
