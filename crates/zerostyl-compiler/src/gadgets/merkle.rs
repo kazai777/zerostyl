@@ -10,14 +10,16 @@
 //! where `(left, right)` is determined by the path index bit at that level.
 //! Supports configurable depth (default 32, matching Tornado Cash / Semaphore).
 
-use super::poseidon_commitment::{PoseidonCommitmentChip, PoseidonCommitmentConfig};
-use halo2_gadgets::poseidon::primitives::{self as poseidon, ConstantLength, P128Pow5T3};
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, Value},
-    pasta::Fp,
     plonk::{Advice, Column, ConstraintSystem, Error, Expression, Selector},
     poly::Rotation,
 };
+use halo2curves::bn256::Fr;
+use halo2curves::group::ff::Field;
+
+use super::poseidon_commitment::{PoseidonCommitmentChip, PoseidonCommitmentConfig};
+use super::poseidon_native;
 
 /// Configuration for the Merkle tree chip.
 ///
@@ -54,7 +56,7 @@ impl MerkleTreeChip {
     ///
     /// Allocates the Poseidon columns plus one extra advice column and selector
     /// for the swap logic.
-    pub fn configure(meta: &mut ConstraintSystem<Fp>) -> MerkleTreeConfig {
+    pub fn configure(meta: &mut ConstraintSystem<Fr>) -> MerkleTreeConfig {
         let poseidon_config = PoseidonCommitmentChip::configure(meta);
         let swap_advice = meta.advice_column();
         meta.enable_equality(swap_advice);
@@ -68,7 +70,7 @@ impl MerkleTreeChip {
         meta.create_gate("merkle path index boolean", |meta| {
             let s = meta.query_selector(swap_selector);
             let index = meta.query_advice(swap_advice, Rotation::cur());
-            vec![s * (index.clone() * (Expression::Constant(Fp::one()) - index))]
+            vec![s * (index.clone() * (Expression::Constant(Fr::ONE) - index))]
         });
 
         // Swap constraint left: if index=0 then left=current, if index=1 then left=sibling
@@ -79,7 +81,7 @@ impl MerkleTreeChip {
             let current = meta.query_advice(state_0, Rotation::cur());
             let sibling = meta.query_advice(state_1, Rotation::cur());
             let left = meta.query_advice(state_0, Rotation::next());
-            let one = Expression::Constant(Fp::one());
+            let one = Expression::Constant(Fr::ONE);
             vec![
                 s * ((one.clone() - index.clone()) * (left.clone() - current)
                     + index * (left - sibling)),
@@ -94,7 +96,7 @@ impl MerkleTreeChip {
             let current = meta.query_advice(state_0, Rotation::cur());
             let sibling = meta.query_advice(state_1, Rotation::cur());
             let right = meta.query_advice(state_1, Rotation::next());
-            let one = Expression::Constant(Fp::one());
+            let one = Expression::Constant(Fr::ONE);
             vec![
                 s * ((one.clone() - index.clone()) * (right.clone() - sibling)
                     + index * (right - current)),
@@ -125,11 +127,11 @@ impl MerkleTreeChip {
     /// Returns [`Error`] if synthesis fails or if the path lengths don't match.
     pub fn verify_membership(
         &self,
-        mut layouter: impl Layouter<Fp>,
-        leaf: AssignedCell<Fp, Fp>,
-        siblings: &[AssignedCell<Fp, Fp>],
-        path_indices: &[AssignedCell<Fp, Fp>],
-    ) -> Result<AssignedCell<Fp, Fp>, Error> {
+        mut layouter: impl Layouter<Fr>,
+        leaf: AssignedCell<Fr, Fr>,
+        siblings: &[AssignedCell<Fr, Fr>],
+        path_indices: &[AssignedCell<Fr, Fr>],
+    ) -> Result<AssignedCell<Fr, Fr>, Error> {
         if siblings.len() != path_indices.len() {
             return Err(Error::Synthesis);
         }
@@ -166,12 +168,12 @@ impl MerkleTreeChip {
                     let left_val = index_val
                         .zip(current_val)
                         .zip(sibling_val)
-                        .map(|((idx, cur), sib)| if idx == Fp::zero() { cur } else { sib });
+                        .map(|((idx, cur), sib)| if idx == Fr::ZERO { cur } else { sib });
 
                     let right_val = index_val
                         .zip(current_val)
                         .zip(sibling_val)
-                        .map(|((idx, cur), sib)| if idx == Fp::zero() { sib } else { cur });
+                        .map(|((idx, cur), sib)| if idx == Fr::ZERO { sib } else { cur });
 
                     // Row 1: assign left and right (constrained by swap gates)
                     let left_cell =
@@ -200,9 +202,9 @@ impl MerkleTreeChip {
     /// Returns [`Error`] if the assignment fails.
     pub fn load_sibling(
         &self,
-        mut layouter: impl Layouter<Fp>,
-        value: Value<Fp>,
-    ) -> Result<AssignedCell<Fp, Fp>, Error> {
+        mut layouter: impl Layouter<Fr>,
+        value: Value<Fr>,
+    ) -> Result<AssignedCell<Fr, Fr>, Error> {
         layouter.assign_region(
             || "load sibling",
             |mut region| {
@@ -223,9 +225,9 @@ impl MerkleTreeChip {
     /// Returns [`Error`] if the assignment fails.
     pub fn load_path_index(
         &self,
-        mut layouter: impl Layouter<Fp>,
-        index: Value<Fp>,
-    ) -> Result<AssignedCell<Fp, Fp>, Error> {
+        mut layouter: impl Layouter<Fr>,
+        index: Value<Fr>,
+    ) -> Result<AssignedCell<Fr, Fr>, Error> {
         layouter.assign_region(
             || "load path index",
             |mut region| {
@@ -242,13 +244,12 @@ impl MerkleTreeChip {
     /// * `siblings` — Sibling hashes (bottom to top)
     /// * `indices` — Path directions (false = left child, true = right child)
     #[must_use]
-    pub fn compute_root_outside_circuit(leaf: Fp, siblings: &[Fp], indices: &[bool]) -> Fp {
+    pub fn compute_root_outside_circuit(leaf: Fr, siblings: &[Fr], indices: &[bool]) -> Fr {
         assert_eq!(siblings.len(), indices.len());
         let mut current = leaf;
         for (sibling, &is_right) in siblings.iter().zip(indices.iter()) {
             let (left, right) = if is_right { (*sibling, current) } else { (current, *sibling) };
-            current = poseidon::Hash::<_, P128Pow5T3, ConstantLength<2>, 3, 2>::init()
-                .hash([left, right]);
+            current = poseidon_native::hash(left, right);
         }
         current
     }
@@ -273,9 +274,9 @@ mod tests {
 
     #[derive(Clone)]
     struct MerkleTestCircuit {
-        leaf: Value<Fp>,
-        siblings: Vec<Value<Fp>>,
-        path_indices: Vec<Value<Fp>>,
+        leaf: Value<Fr>,
+        siblings: Vec<Value<Fr>>,
+        path_indices: Vec<Value<Fr>>,
     }
 
     #[derive(Debug, Clone)]
@@ -284,7 +285,7 @@ mod tests {
         instance: Column<Instance>,
     }
 
-    impl Circuit<Fp> for MerkleTestCircuit {
+    impl Circuit<Fr> for MerkleTestCircuit {
         type Config = MerkleTestConfig;
         type FloorPlanner = SimpleFloorPlanner;
 
@@ -296,7 +297,7 @@ mod tests {
             }
         }
 
-        fn configure(meta: &mut ConstraintSystem<Fp>) -> MerkleTestConfig {
+        fn configure(meta: &mut ConstraintSystem<Fr>) -> MerkleTestConfig {
             let merkle = MerkleTreeChip::configure(meta);
             let instance = meta.instance_column();
             meta.enable_equality(instance);
@@ -307,7 +308,7 @@ mod tests {
         fn synthesize(
             &self,
             config: MerkleTestConfig,
-            mut layouter: impl Layouter<Fp>,
+            mut layouter: impl Layouter<Fr>,
         ) -> Result<(), Error> {
             let chip = MerkleTreeChip::construct(config.merkle.clone());
             let poseidon_chip =
@@ -316,7 +317,7 @@ mod tests {
             let leaf_cell =
                 poseidon_chip.load_private(layouter.namespace(|| "load leaf"), self.leaf, 0)?;
 
-            let sibling_cells: Vec<AssignedCell<Fp, Fp>> = self
+            let sibling_cells: Vec<AssignedCell<Fr, Fr>> = self
                 .siblings
                 .iter()
                 .enumerate()
@@ -325,7 +326,7 @@ mod tests {
                 })
                 .collect::<Result<Vec<_>, _>>()?;
 
-            let index_cells: Vec<AssignedCell<Fp, Fp>> = self
+            let index_cells: Vec<AssignedCell<Fr, Fr>> = self
                 .path_indices
                 .iter()
                 .enumerate()
@@ -347,9 +348,9 @@ mod tests {
         }
     }
 
-    fn make_test_data(depth: usize) -> (Fp, Vec<Fp>, Vec<bool>, Fp) {
-        let leaf = Fp::from(42u64);
-        let siblings: Vec<Fp> = (0..depth).map(|i| Fp::from((i + 100) as u64)).collect();
+    fn make_test_data(depth: usize) -> (Fr, Vec<Fr>, Vec<bool>, Fr) {
+        let leaf = Fr::from(42u64);
+        let siblings: Vec<Fr> = (0..depth).map(|i| Fr::from((i + 100) as u64)).collect();
         let indices: Vec<bool> = (0..depth).map(|i| i % 2 == 0).collect();
         let root = MerkleTreeChip::compute_root_outside_circuit(leaf, &siblings, &indices);
         (leaf, siblings, indices, root)
@@ -364,7 +365,7 @@ mod tests {
             siblings: siblings.iter().map(|s| Value::known(*s)).collect(),
             path_indices: indices
                 .iter()
-                .map(|&b| Value::known(if b { Fp::one() } else { Fp::zero() }))
+                .map(|&b| Value::known(if b { Fr::ONE } else { Fr::ZERO }))
                 .collect(),
         };
 
@@ -376,14 +377,14 @@ mod tests {
     #[test]
     fn test_merkle_wrong_root_rejected() {
         let (leaf, siblings, indices, _) = make_test_data(TEST_DEPTH);
-        let wrong_root = Fp::from(999u64);
+        let wrong_root = Fr::from(999u64);
 
         let circuit = MerkleTestCircuit {
             leaf: Value::known(leaf),
             siblings: siblings.iter().map(|s| Value::known(*s)).collect(),
             path_indices: indices
                 .iter()
-                .map(|&b| Value::known(if b { Fp::one() } else { Fp::zero() }))
+                .map(|&b| Value::known(if b { Fr::ONE } else { Fr::ZERO }))
                 .collect(),
         };
 
@@ -395,14 +396,14 @@ mod tests {
     #[test]
     fn test_merkle_modified_sibling_rejected() {
         let (leaf, mut siblings, indices, expected_root) = make_test_data(TEST_DEPTH);
-        siblings[1] = Fp::from(999u64); // Tamper with sibling
+        siblings[1] = Fr::from(999u64); // Tamper with sibling
 
         let circuit = MerkleTestCircuit {
             leaf: Value::known(leaf),
             siblings: siblings.iter().map(|s| Value::known(*s)).collect(),
             path_indices: indices
                 .iter()
-                .map(|&b| Value::known(if b { Fp::one() } else { Fp::zero() }))
+                .map(|&b| Value::known(if b { Fr::ONE } else { Fr::ZERO }))
                 .collect(),
         };
 
@@ -420,7 +421,7 @@ mod tests {
             siblings: siblings.iter().map(|s| Value::known(*s)).collect(),
             path_indices: indices
                 .iter()
-                .map(|&b| Value::known(if b { Fp::one() } else { Fp::zero() }))
+                .map(|&b| Value::known(if b { Fr::ONE } else { Fr::ZERO }))
                 .collect(),
         };
 
@@ -438,7 +439,7 @@ mod tests {
             siblings: siblings.iter().map(|s| Value::known(*s)).collect(),
             path_indices: indices
                 .iter()
-                .map(|&b| Value::known(if b { Fp::one() } else { Fp::zero() }))
+                .map(|&b| Value::known(if b { Fr::ONE } else { Fr::ZERO }))
                 .collect(),
         };
 
@@ -451,9 +452,9 @@ mod tests {
     fn test_merkle_non_boolean_index_rejected() {
         let (leaf, siblings, indices, root) = make_test_data(TEST_DEPTH);
 
-        let mut fp_indices: Vec<Value<Fp>> =
-            indices.iter().map(|&b| Value::known(if b { Fp::one() } else { Fp::zero() })).collect();
-        fp_indices[0] = Value::known(Fp::from(2u64)); // Not boolean!
+        let mut fp_indices: Vec<Value<Fr>> =
+            indices.iter().map(|&b| Value::known(if b { Fr::ONE } else { Fr::ZERO })).collect();
+        fp_indices[0] = Value::known(Fr::from(2u64)); // Not boolean!
 
         let circuit = MerkleTestCircuit {
             leaf: Value::known(leaf),
@@ -486,7 +487,7 @@ mod tests {
             siblings: siblings.iter().map(|s| Value::known(*s)).collect(),
             path_indices: tampered_indices
                 .iter()
-                .map(|&b| Value::known(if b { Fp::one() } else { Fp::zero() }))
+                .map(|&b| Value::known(if b { Fr::ONE } else { Fr::ZERO }))
                 .collect(),
         };
 
@@ -506,7 +507,7 @@ mod tests {
             siblings: siblings.iter().map(|s| Value::known(*s)).collect(),
             path_indices: indices[..TEST_DEPTH - 1]
                 .iter()
-                .map(|&b| Value::known(if b { Fp::one() } else { Fp::zero() }))
+                .map(|&b| Value::known(if b { Fr::ONE } else { Fr::ZERO }))
                 .collect(),
         };
 

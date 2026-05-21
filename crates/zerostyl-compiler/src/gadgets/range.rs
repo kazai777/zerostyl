@@ -15,11 +15,11 @@
 
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, Value},
-    pasta::Fp,
     plonk::{Advice, Column, ConstraintSystem, Error, Fixed, Selector},
     poly::Rotation,
 };
-use halo2curves::ff::PrimeField;
+use halo2curves::bn256::Fr;
+use halo2curves::ff::{Field, PrimeField};
 
 /// Configuration for the range proof chip.
 #[derive(Debug, Clone)]
@@ -42,7 +42,7 @@ impl RangeProofChip {
     /// Configures the range proof chip.
     ///
     /// Allocates 2 advice columns and 2 selectors for boolean and recomposition gates.
-    pub fn configure(meta: &mut ConstraintSystem<Fp>) -> RangeProofConfig {
+    pub fn configure(meta: &mut ConstraintSystem<Fr>) -> RangeProofConfig {
         let value_col = meta.advice_column();
         let bits_col = meta.advice_column();
         meta.enable_equality(value_col);
@@ -58,7 +58,7 @@ impl RangeProofChip {
         meta.create_gate("range bit boolean", |meta| {
             let s = meta.query_selector(bool_selector);
             let bit = meta.query_advice(bits_col, Rotation::cur());
-            vec![s * (bit.clone() * (halo2_proofs::plonk::Expression::Constant(Fp::one()) - bit))]
+            vec![s * (bit.clone() * (halo2_proofs::plonk::Expression::Constant(Fr::ONE) - bit))]
         });
 
         // Recomposition constraint: accumulated - value == 0
@@ -73,7 +73,7 @@ impl RangeProofChip {
             // acc_next = acc_prev * 2 + bit
             vec![
                 s * (acc_next
-                    - (acc_prev * halo2_proofs::plonk::Expression::Constant(Fp::from(2u64)) + bit)),
+                    - (acc_prev * halo2_proofs::plonk::Expression::Constant(Fr::from(2u64)) + bit)),
             ]
         });
 
@@ -82,7 +82,7 @@ impl RangeProofChip {
         meta.create_gate("bounded diff", |meta| {
             let s = meta.query_selector(bounded_diff_selector);
             let value = meta.query_advice(value_col, Rotation::cur());
-            let constant = meta.query_fixed(fixed_col);
+            let constant = meta.query_fixed(fixed_col, Rotation::cur());
             let diff = meta.query_advice(bits_col, Rotation::cur());
             vec![s * (value - constant - diff)]
         });
@@ -92,7 +92,7 @@ impl RangeProofChip {
         meta.create_gate("bounded diff reverse", |meta| {
             let s = meta.query_selector(bounded_diff_reverse_selector);
             let value = meta.query_advice(value_col, Rotation::cur());
-            let constant = meta.query_fixed(fixed_col);
+            let constant = meta.query_fixed(fixed_col, Rotation::cur());
             let diff = meta.query_advice(bits_col, Rotation::cur());
             vec![s * (constant - value - diff)]
         });
@@ -129,8 +129,8 @@ impl RangeProofChip {
     /// Returns [`Error`] if synthesis fails.
     pub fn check_range(
         &self,
-        mut layouter: impl Layouter<Fp>,
-        value: AssignedCell<Fp, Fp>,
+        mut layouter: impl Layouter<Fr>,
+        value: AssignedCell<Fr, Fr>,
         num_bits: usize,
     ) -> Result<(), Error> {
         if num_bits == 0 || num_bits > 64 {
@@ -147,11 +147,11 @@ impl RangeProofChip {
                     || "acc init",
                     self.config.value_col,
                     0,
-                    || Value::known(Fp::zero()),
+                    || Value::known(Fr::ZERO),
                 )?;
 
                 // Decompose into bits (MSB to LSB)
-                let bits: Vec<Value<Fp>> = (0..num_bits)
+                let bits: Vec<Value<Fr>> = (0..num_bits)
                     .rev()
                     .map(|i| {
                         value_fp.map(|v| {
@@ -161,16 +161,16 @@ impl RangeProofChip {
                             if byte_idx < v_bytes.as_ref().len()
                                 && (v_bytes.as_ref()[byte_idx] >> bit_idx) & 1 == 1
                             {
-                                Fp::one()
+                                Fr::ONE
                             } else {
-                                Fp::zero()
+                                Fr::ZERO
                             }
                         })
                     })
                     .collect();
 
                 // Assign bits and accumulators
-                let mut acc = Value::known(Fp::zero());
+                let mut acc = Value::known(Fr::ZERO);
                 let mut last_acc_cell = None;
                 for (row, bit_val) in bits.iter().enumerate() {
                     self.config.bool_selector.enable(&mut region, row)?;
@@ -183,7 +183,7 @@ impl RangeProofChip {
                         || *bit_val,
                     )?;
 
-                    acc = acc.zip(*bit_val).map(|(a, b)| a * Fp::from(2u64) + b);
+                    acc = acc.zip(*bit_val).map(|(a, b)| a * Fr::from(2u64) + b);
 
                     last_acc_cell = Some(region.assign_advice(
                         || format!("acc {}", row + 1),
@@ -228,10 +228,10 @@ impl RangeProofChip {
     /// Returns [`Error`] if synthesis fails.
     pub fn check_range_bounded(
         &self,
-        mut layouter: impl Layouter<Fp>,
-        value: AssignedCell<Fp, Fp>,
-        min: Fp,
-        max: Fp,
+        mut layouter: impl Layouter<Fr>,
+        value: AssignedCell<Fr, Fr>,
+        min: Fr,
+        max: Fr,
         num_bits: usize,
     ) -> Result<(), Error> {
         // value_minus_min = value - min (constrained by "bounded diff" gate)
@@ -291,9 +291,9 @@ impl RangeProofChip {
     /// Returns [`Error`] if the assignment fails.
     pub fn load_value(
         &self,
-        mut layouter: impl Layouter<Fp>,
-        value: Value<Fp>,
-    ) -> Result<AssignedCell<Fp, Fp>, Error> {
+        mut layouter: impl Layouter<Fr>,
+        value: Value<Fr>,
+    ) -> Result<AssignedCell<Fr, Fr>, Error> {
         layouter.assign_region(
             || "load range value",
             |mut region| region.assign_advice(|| "range value", self.config.value_col, 0, || value),
@@ -314,11 +314,11 @@ mod tests {
 
     #[derive(Clone)]
     struct RangeTestCircuit {
-        value: Value<Fp>,
+        value: Value<Fr>,
         num_bits: usize,
     }
 
-    impl Circuit<Fp> for RangeTestCircuit {
+    impl Circuit<Fr> for RangeTestCircuit {
         type Config = RangeProofConfig;
         type FloorPlanner = SimpleFloorPlanner;
 
@@ -326,14 +326,14 @@ mod tests {
             Self { value: Value::unknown(), num_bits: self.num_bits }
         }
 
-        fn configure(meta: &mut ConstraintSystem<Fp>) -> RangeProofConfig {
+        fn configure(meta: &mut ConstraintSystem<Fr>) -> RangeProofConfig {
             RangeProofChip::configure(meta)
         }
 
         fn synthesize(
             &self,
             config: RangeProofConfig,
-            mut layouter: impl Layouter<Fp>,
+            mut layouter: impl Layouter<Fr>,
         ) -> Result<(), Error> {
             let chip = RangeProofChip::construct(config);
             let value_cell = chip.load_value(layouter.namespace(|| "load value"), self.value)?;
@@ -343,13 +343,13 @@ mod tests {
 
     #[derive(Clone)]
     struct BoundedRangeTestCircuit {
-        value: Value<Fp>,
-        min: Fp,
-        max: Fp,
+        value: Value<Fr>,
+        min: Fr,
+        max: Fr,
         num_bits: usize,
     }
 
-    impl Circuit<Fp> for BoundedRangeTestCircuit {
+    impl Circuit<Fr> for BoundedRangeTestCircuit {
         type Config = RangeProofConfig;
         type FloorPlanner = SimpleFloorPlanner;
 
@@ -357,14 +357,14 @@ mod tests {
             Self { value: Value::unknown(), min: self.min, max: self.max, num_bits: self.num_bits }
         }
 
-        fn configure(meta: &mut ConstraintSystem<Fp>) -> RangeProofConfig {
+        fn configure(meta: &mut ConstraintSystem<Fr>) -> RangeProofConfig {
             RangeProofChip::configure(meta)
         }
 
         fn synthesize(
             &self,
             config: RangeProofConfig,
-            mut layouter: impl Layouter<Fp>,
+            mut layouter: impl Layouter<Fr>,
         ) -> Result<(), Error> {
             let chip = RangeProofChip::construct(config);
             let value_cell = chip.load_value(layouter.namespace(|| "load value"), self.value)?;
@@ -380,7 +380,7 @@ mod tests {
 
     #[test]
     fn test_range_8bit_valid() {
-        let circuit = RangeTestCircuit { value: Value::known(Fp::from(255u64)), num_bits: 8 };
+        let circuit = RangeTestCircuit { value: Value::known(Fr::from(255u64)), num_bits: 8 };
         let k = 10;
         let prover = MockProver::run(k, &circuit, vec![]).unwrap();
         prover.assert_satisfied();
@@ -388,7 +388,7 @@ mod tests {
 
     #[test]
     fn test_range_8bit_zero() {
-        let circuit = RangeTestCircuit { value: Value::known(Fp::zero()), num_bits: 8 };
+        let circuit = RangeTestCircuit { value: Value::known(Fr::ZERO), num_bits: 8 };
         let k = 10;
         let prover = MockProver::run(k, &circuit, vec![]).unwrap();
         prover.assert_satisfied();
@@ -396,7 +396,7 @@ mod tests {
 
     #[test]
     fn test_range_8bit_overflow_rejected() {
-        let circuit = RangeTestCircuit { value: Value::known(Fp::from(256u64)), num_bits: 8 };
+        let circuit = RangeTestCircuit { value: Value::known(Fr::from(256u64)), num_bits: 8 };
         let k = 10;
         let prover = MockProver::run(k, &circuit, vec![]).unwrap();
         assert!(prover.verify().is_err());
@@ -404,7 +404,7 @@ mod tests {
 
     #[test]
     fn test_range_16bit_valid() {
-        let circuit = RangeTestCircuit { value: Value::known(Fp::from(65535u64)), num_bits: 16 };
+        let circuit = RangeTestCircuit { value: Value::known(Fr::from(65535u64)), num_bits: 16 };
         let k = 10;
         let prover = MockProver::run(k, &circuit, vec![]).unwrap();
         prover.assert_satisfied();
@@ -413,7 +413,7 @@ mod tests {
     #[test]
     fn test_range_32bit_valid() {
         let circuit =
-            RangeTestCircuit { value: Value::known(Fp::from(u32::MAX as u64)), num_bits: 32 };
+            RangeTestCircuit { value: Value::known(Fr::from(u32::MAX as u64)), num_bits: 32 };
         let k = 10;
         let prover = MockProver::run(k, &circuit, vec![]).unwrap();
         prover.assert_satisfied();
@@ -421,7 +421,7 @@ mod tests {
 
     #[test]
     fn test_range_64bit_valid() {
-        let circuit = RangeTestCircuit { value: Value::known(Fp::from(u64::MAX)), num_bits: 64 };
+        let circuit = RangeTestCircuit { value: Value::known(Fr::from(u64::MAX)), num_bits: 64 };
         let k = 10;
         let prover = MockProver::run(k, &circuit, vec![]).unwrap();
         prover.assert_satisfied();
@@ -430,7 +430,7 @@ mod tests {
     #[test]
     fn test_range_64bit_large_value() {
         let circuit =
-            RangeTestCircuit { value: Value::known(Fp::from(1_000_000_000_000u64)), num_bits: 64 };
+            RangeTestCircuit { value: Value::known(Fr::from(1_000_000_000_000u64)), num_bits: 64 };
         let k = 10;
         let prover = MockProver::run(k, &circuit, vec![]).unwrap();
         prover.assert_satisfied();
@@ -439,9 +439,9 @@ mod tests {
     #[test]
     fn test_bounded_range_valid() {
         let circuit = BoundedRangeTestCircuit {
-            value: Value::known(Fp::from(200u64)),
-            min: Fp::from(150u64),
-            max: Fp::from(300u64),
+            value: Value::known(Fr::from(200u64)),
+            min: Fr::from(150u64),
+            max: Fr::from(300u64),
             num_bits: 16,
         };
         let k = 10;
@@ -452,9 +452,9 @@ mod tests {
     #[test]
     fn test_bounded_range_at_min() {
         let circuit = BoundedRangeTestCircuit {
-            value: Value::known(Fp::from(150u64)),
-            min: Fp::from(150u64),
-            max: Fp::from(300u64),
+            value: Value::known(Fr::from(150u64)),
+            min: Fr::from(150u64),
+            max: Fr::from(300u64),
             num_bits: 16,
         };
         let k = 10;
@@ -465,9 +465,9 @@ mod tests {
     #[test]
     fn test_bounded_range_at_max() {
         let circuit = BoundedRangeTestCircuit {
-            value: Value::known(Fp::from(300u64)),
-            min: Fp::from(150u64),
-            max: Fp::from(300u64),
+            value: Value::known(Fr::from(300u64)),
+            min: Fr::from(150u64),
+            max: Fr::from(300u64),
             num_bits: 16,
         };
         let k = 10;
@@ -478,9 +478,9 @@ mod tests {
     #[test]
     fn test_bounded_range_below_min_rejected() {
         let circuit = BoundedRangeTestCircuit {
-            value: Value::known(Fp::from(149u64)),
-            min: Fp::from(150u64),
-            max: Fp::from(300u64),
+            value: Value::known(Fr::from(149u64)),
+            min: Fr::from(150u64),
+            max: Fr::from(300u64),
             num_bits: 16,
         };
         let k = 10;
@@ -491,9 +491,9 @@ mod tests {
     #[test]
     fn test_bounded_range_above_max_rejected() {
         let circuit = BoundedRangeTestCircuit {
-            value: Value::known(Fp::from(301u64)),
-            min: Fp::from(150u64),
-            max: Fp::from(300u64),
+            value: Value::known(Fr::from(301u64)),
+            min: Fr::from(150u64),
+            max: Fr::from(300u64),
             num_bits: 16,
         };
         let k = 10;
@@ -504,7 +504,7 @@ mod tests {
     // FINAL-N2: check_range validates num_bits parameter
     #[test]
     fn test_check_range_zero_bits_returns_error() {
-        let circuit = RangeTestCircuit { value: Value::known(Fp::from(0u64)), num_bits: 0 };
+        let circuit = RangeTestCircuit { value: Value::known(Fr::from(0u64)), num_bits: 0 };
         let k = 10;
         let result = MockProver::run(k, &circuit, vec![]);
         assert!(result.is_err(), "check_range(0 bits) must return Err, not panic");
@@ -512,7 +512,7 @@ mod tests {
 
     #[test]
     fn test_check_range_too_many_bits_returns_error() {
-        let circuit = RangeTestCircuit { value: Value::known(Fp::from(42u64)), num_bits: 65 };
+        let circuit = RangeTestCircuit { value: Value::known(Fr::from(42u64)), num_bits: 65 };
         let k = 10;
         let result = MockProver::run(k, &circuit, vec![]);
         assert!(result.is_err(), "check_range(65 bits) must return Err");
