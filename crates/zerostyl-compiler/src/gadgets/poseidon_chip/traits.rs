@@ -9,7 +9,7 @@ use std::fmt;
 use halo2_poseidon::{Absorbing, Domain, Spec, Squeezing, State};
 use halo2_proofs::{
     circuit::{AssignedCell, Cell, Chip, Layouter, Value},
-    plonk::Error,
+    plonk::{ConstraintSystem, Error},
 };
 use halo2curves::group::ff::Field;
 
@@ -34,10 +34,22 @@ pub enum PaddedWord<F: Field> {
     Padding(F),
 }
 
+pub trait PermuteChip<F: Field, S: Spec<F, T, RATE>, const T: usize, const RATE: usize>:
+    Chip<F> + Clone + fmt::Debug + PoseidonInstructions<F, S, T, RATE>
+{
+    fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config;
+    fn construct(config: Self::Config) -> Self;
+}
+
 pub trait PoseidonInstructions<F: Field, S: Spec<F, T, RATE>, const T: usize, const RATE: usize>:
     Chip<F>
 {
-    type Word: Clone + fmt::Debug + From<AssignedCell<F, F>> + Into<AssignedCell<F, F>>;
+    type Word: Clone
+        + fmt::Debug
+        + From<AssignedCell<F, F>>
+        + Into<AssignedCell<F, F>>
+        + Send
+        + Sync;
 
     fn permute(
         &self,
