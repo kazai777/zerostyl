@@ -17,7 +17,7 @@ required-features = ["std"]
 [dependencies]
 # Halo2 dependencies
 # Disable default features (multicore) for WASM compatibility
-halo2_proofs = { version = "0.3", default-features = false }
+halo2_proofs = { version = "=0.3.0", default-features = false }
 halo2curves = { version = "0.7", default-features = false, features = ["bits"] }
 
 # Serialization - no_std compatible
@@ -41,7 +41,7 @@ mini-alloc = { version = "0.9", optional = true }
 getrandom = { version = "0.2", default-features = false, features = ["custom"] }
 
 [build-dependencies]
-halo2_proofs = "0.3"
+halo2_proofs = "=0.3.0"
 halo2curves = { version = "0.7", features = ["bits", "derive_serde"] }
 
 [dev-dependencies]
