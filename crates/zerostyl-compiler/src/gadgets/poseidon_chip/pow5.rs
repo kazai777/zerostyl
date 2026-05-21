@@ -1,12 +1,12 @@
 use std::convert::TryInto;
 use std::iter;
 
-use group::ff::Field;
 use halo2_proofs::{
     circuit::{AssignedCell, Cell, Chip, Layouter, Region, Value},
     plonk::{Advice, Any, Column, ConstraintSystem, Error, Expression, Fixed, Selector},
     poly::Rotation,
 };
+use halo2curves::group::ff::Field;
 
 use halo2_poseidon::{Absorbing, Domain, Mds, Spec, Squeezing, State};
 

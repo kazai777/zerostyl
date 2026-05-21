@@ -7,7 +7,7 @@
 //!
 //! ```rust
 //! use zerostyl_compiler::{parse_contract, transform_to_ir, CircuitBuilder};
-//! use halo2curves::pasta::Fp;
+//! use halo2curves::bn256::Fr;
 //!
 //! let input = r#"
 //!     struct MyCircuit {
@@ -18,7 +18,7 @@
 //!
 //! let parsed = parse_contract(input).unwrap();
 //! let ir = transform_to_ir(parsed).unwrap();
-//! let circuit = CircuitBuilder::new(ir).build::<Fp>();
+//! let circuit = CircuitBuilder::new(ir).build::<Fr>();
 //! ```
 
 use crate::ast::ComparisonOp;
@@ -27,9 +27,9 @@ use crate::{CircuitIR, CompilerError, Constraint, ZkType};
 use halo2_proofs::{
     arithmetic::Field as Halo2Field,
     circuit::{Layouter, SimpleFloorPlanner, Value},
-    pasta::Fp,
     plonk::{Advice, Circuit, Column, ConstraintSystem, Error as Halo2Error, Instance},
 };
+use halo2curves::bn256::Fr;
 
 pub struct CircuitBuilder {
     circuit_ir: CircuitIR,
@@ -108,7 +108,7 @@ impl<F: Halo2Field> ZkCircuit<F> {
     /// # Examples
     /// ```
     /// use zerostyl_compiler::{parse_contract, transform_to_ir, CircuitBuilder};
-    /// use halo2curves::pasta::Fp;
+    /// use halo2curves::bn256::Fr;
     ///
     /// let input = r#"
     ///     struct MyCircuit {
@@ -120,8 +120,8 @@ impl<F: Halo2Field> ZkCircuit<F> {
     /// let parsed = parse_contract(input).unwrap();
     /// let ir = transform_to_ir(parsed).unwrap();
     /// let circuit = CircuitBuilder::new(ir)
-    ///     .build::<Fp>()
-    ///     .with_witnesses(vec![Fp::from(42)]);
+    ///     .build::<Fr>()
+    ///     .with_witnesses(vec![Fr::from(42)]);
     /// ```
     pub fn with_witnesses(mut self, witnesses: Vec<F>) -> Result<Self, CompilerError> {
         if witnesses.len() != self.ir.private_witnesses.len() {
@@ -165,7 +165,7 @@ impl<F: Halo2Field> ZkCircuit<F> {
     }
 }
 
-impl Circuit<Fp> for ZkCircuit<Fp> {
+impl Circuit<Fr> for ZkCircuit<Fr> {
     type Config = ZkCircuitConfig;
     type FloorPlanner = SimpleFloorPlanner;
 
@@ -177,7 +177,7 @@ impl Circuit<Fp> for ZkCircuit<Fp> {
         }
     }
 
-    fn configure(meta: &mut ConstraintSystem<Fp>) -> Self::Config {
+    fn configure(meta: &mut ConstraintSystem<Fr>) -> Self::Config {
         // Configure gadgets — each allocates its own columns and gates
         let range_config = RangeProofChip::configure(meta);
         let comparison_config = ComparisonChip::configure(meta);
@@ -200,12 +200,12 @@ impl Circuit<Fp> for ZkCircuit<Fp> {
     fn synthesize(
         &self,
         config: Self::Config,
-        mut layouter: impl Layouter<Fp>,
+        mut layouter: impl Layouter<Fr>,
     ) -> Result<(), Halo2Error> {
         let range_chip = RangeProofChip::construct(config.range_config.clone());
         let comparison_chip = ComparisonChip::construct(config.comparison_config.clone());
 
-        let mut unconstrained: Vec<(usize, Value<Fp>)> = Vec::new();
+        let mut unconstrained: Vec<(usize, Value<Fr>)> = Vec::new();
 
         for (idx, (field, &wv)) in
             self.ir.private_witnesses.iter().zip(self.witness_values.iter()).enumerate()
@@ -241,8 +241,8 @@ impl Circuit<Fp> for ZkCircuit<Fp> {
                         if *min > u64::MAX as u128 || *max > u64::MAX as u128 {
                             return Err(Halo2Error::Synthesis);
                         }
-                        let min_fp = Fp::from(*min as u64);
-                        let max_fp = Fp::from(*max as u64);
+                        let min_fp = Fr::from(*min as u64);
+                        let max_fp = Fr::from(*max as u64);
                         let cell = range_chip
                             .load_value(layouter.namespace(|| format!("load_rp_{}", idx)), wv)?;
                         range_chip.check_range_bounded(
@@ -257,7 +257,7 @@ impl Circuit<Fp> for ZkCircuit<Fp> {
                     Constraint::Comparison { operator, value } => {
                         let witness_cell = comparison_chip
                             .load_value(layouter.namespace(|| format!("load_cmp_{}", idx)), wv)?;
-                        let threshold = Value::known(Fp::from(*value));
+                        let threshold = Value::known(Fr::from(*value));
                         let threshold_cell = comparison_chip.load_value(
                             layouter.namespace(|| format!("load_cmp_thr_{}", idx)),
                             threshold,
@@ -490,7 +490,7 @@ mod tests {
 
     #[test]
     fn test_with_witnesses() {
-        use halo2curves::pasta::Fp;
+        use halo2curves::bn256::Fr;
 
         let input = r#"
             struct TestCircuit {
@@ -504,8 +504,8 @@ mod tests {
         let parsed = parse_contract(input).unwrap();
         let ir = transform_to_ir(parsed).unwrap();
         let circuit = CircuitBuilder::new(ir)
-            .build::<Fp>()
-            .with_witnesses(vec![Fp::from(42), Fp::from(100)])
+            .build::<Fr>()
+            .with_witnesses(vec![Fr::from(42), Fr::from(100)])
             .unwrap();
 
         assert_eq!(circuit.witness_values.len(), 2);
@@ -513,7 +513,7 @@ mod tests {
 
     #[test]
     fn test_with_witnesses_wrong_count() {
-        use halo2curves::pasta::Fp;
+        use halo2curves::bn256::Fr;
 
         let input = r#"
             struct TestCircuit {
@@ -525,7 +525,7 @@ mod tests {
         let parsed = parse_contract(input).unwrap();
         let ir = transform_to_ir(parsed).unwrap();
         let result =
-            CircuitBuilder::new(ir).build::<Fp>().with_witnesses(vec![Fp::from(42), Fp::from(100)]);
+            CircuitBuilder::new(ir).build::<Fr>().with_witnesses(vec![Fr::from(42), Fr::from(100)]);
 
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Expected 1 witnesses but got 2"));
@@ -533,7 +533,7 @@ mod tests {
 
     #[test]
     fn test_with_public_inputs_empty() {
-        use halo2curves::pasta::Fp;
+        use halo2curves::bn256::Fr;
 
         let input = r#"
             struct TestCircuit {
@@ -548,13 +548,13 @@ mod tests {
         // Currently our parser doesn't create public inputs
         assert_eq!(ir.public_inputs.len(), 0);
 
-        let circuit = CircuitBuilder::new(ir).build::<Fp>();
+        let circuit = CircuitBuilder::new(ir).build::<Fr>();
         assert_eq!(circuit.num_public_inputs(), 0);
     }
 
     #[test]
     fn test_num_witnesses_and_public_inputs() {
-        use halo2curves::pasta::Fp;
+        use halo2curves::bn256::Fr;
 
         let input = r#"
             struct TestCircuit {
@@ -567,7 +567,7 @@ mod tests {
 
         let parsed = parse_contract(input).unwrap();
         let ir = transform_to_ir(parsed).unwrap();
-        let circuit = CircuitBuilder::new(ir).build::<Fp>();
+        let circuit = CircuitBuilder::new(ir).build::<Fr>();
 
         assert_eq!(circuit.num_witnesses(), 2);
         assert_eq!(circuit.num_public_inputs(), 0);
