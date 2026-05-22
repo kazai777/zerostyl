@@ -7,6 +7,11 @@ license.workspace = true
 
 [dependencies]
 sp1-sdk = "=6.2.1"
+zerostyl-verifier = { path = "../../zerostyl-verifier", default-features = false, features = ["std"] }
+postcard = "1.1"
+serde = { version = "1.0", features = ["derive"] }
+anyhow = "1.0"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
 [[bin]]
 name = "zerostyl-sp1-script"

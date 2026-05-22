@@ -7,6 +7,8 @@ license.workspace = true
 
 [dependencies]
 sp1-zkvm = "=6.2.1"
+postcard = { version = "1.1", default-features = false, features = ["alloc"] }
+serde = { version = "1.0", default-features = false, features = ["derive", "alloc"] }
 
 [[bin]]
 name = "zerostyl-sp1-program"
