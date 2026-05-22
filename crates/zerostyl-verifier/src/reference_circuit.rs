@@ -6,6 +6,9 @@
 //!
 //! Gate: `a + b = sum` where `sum` is a public input.
 
+#[cfg(not(feature = "std"))]
+use alloc::vec;
+
 use halo2_proofs::{
     circuit::{Layouter, SimpleFloorPlanner, Value},
     plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Instance, Selector},

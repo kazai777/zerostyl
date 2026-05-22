@@ -1,7 +1,24 @@
 use anyhow::{anyhow, Context, Result};
+use halo2_proofs::{
+    plonk::{create_proof, keygen_pk, keygen_vk},
+    poly::{
+        commitment::Params,
+        kzg::{
+            commitment::{KZGCommitmentScheme, ParamsKZG},
+            multiopen::ProverSHPLONK,
+        },
+    },
+    transcript::{Challenge255, Keccak256Write, TranscriptWriterBuffer},
+    SerdeFormat,
+};
+use halo2curves::bn256::{Bn256, Fr, G1Affine};
+use rand::rngs::OsRng;
 use sp1_sdk::{Prover, ProverClient, SP1Stdin};
 use std::path::PathBuf;
-use zerostyl_verifier::vk_components::VkComponents;
+use tiny_keccak::{Hasher, Keccak};
+use zerostyl_verifier::reference_circuit::{ReferenceCircuit, REFERENCE_K};
+
+const CIRCUIT_KIND_REFERENCE: u16 = 0;
 
 const ELF_PATH: &str =
     "../program/elf/riscv32im-succinct-zkvm-elf/release/zerostyl-sp1-program";
@@ -11,48 +28,89 @@ async fn main() -> Result<()> {
     sp1_sdk::utils::setup_logger();
 
     let elf = load_elf()?;
-
-    let vk = sample_vk_components();
-    let proof_bytes: Vec<u8> = vec![0u8; 64];
-    let inputs_bytes: Vec<u8> = vec![0u8; 32];
-
-    let vk_bytes = postcard::to_allocvec(&vk).context("encode VkComponents")?;
+    let job = generate_reference_proof()?;
 
     let mut stdin = SP1Stdin::new();
-    stdin.write_vec(vk_bytes);
-    stdin.write_vec(proof_bytes.clone());
-    stdin.write_vec(inputs_bytes.clone());
+    stdin.write(&CIRCUIT_KIND_REFERENCE);
+    stdin.write_vec(job.params_bytes);
+    stdin.write_vec(job.vk_bytes.clone());
+    stdin.write_vec(job.proof_bytes);
+    stdin.write_vec(job.inputs_bytes.clone());
 
     let client = ProverClient::from_env().await;
-    let (mut public_values, _report) = client
+    let (mut public_values, report) = client
         .execute(elf.into(), stdin)
         .await
         .map_err(|e| anyhow!("execute: {e}"))?;
 
-    let echoed_k: u32 = public_values.read();
-    let echoed_proof_len: u32 = public_values.read();
-    let echoed_inputs_len: u32 = public_values.read();
+    let mut got_vk_hash = [0u8; 32];
+    let mut got_inputs_hash = [0u8; 32];
+    public_values.read_slice(&mut got_vk_hash);
+    public_values.read_slice(&mut got_inputs_hash);
 
-    if echoed_k != vk.k {
-        return Err(anyhow!("k mismatch: guest={echoed_k} host={}", vk.k));
+    let expected_vk_hash = keccak(&job.vk_bytes);
+    let expected_inputs_hash = keccak(&job.inputs_bytes);
+
+    if got_vk_hash != expected_vk_hash {
+        return Err(anyhow!("vk_hash mismatch: guest={got_vk_hash:?} host={expected_vk_hash:?}"));
     }
-    if echoed_proof_len as usize != proof_bytes.len() {
+    if got_inputs_hash != expected_inputs_hash {
         return Err(anyhow!(
-            "proof_bytes length mismatch: guest={echoed_proof_len} host={}",
-            proof_bytes.len()
-        ));
-    }
-    if echoed_inputs_len as usize != inputs_bytes.len() {
-        return Err(anyhow!(
-            "inputs_bytes length mismatch: guest={echoed_inputs_len} host={}",
-            inputs_bytes.len()
+            "inputs_hash mismatch: guest={got_inputs_hash:?} host={expected_inputs_hash:?}"
         ));
     }
 
     println!(
-        "pipe ok: k={echoed_k} proof_len={echoed_proof_len} inputs_len={echoed_inputs_len}"
+        "verify ok | cycles={} | vk_hash=0x{} | inputs_hash=0x{}",
+        report.total_instruction_count(),
+        hex(&got_vk_hash),
+        hex(&got_inputs_hash),
     );
     Ok(())
+}
+
+struct ProofJob {
+    params_bytes: Vec<u8>,
+    vk_bytes: Vec<u8>,
+    proof_bytes: Vec<u8>,
+    inputs_bytes: Vec<u8>,
+}
+
+fn generate_reference_proof() -> Result<ProofJob> {
+    use halo2_proofs::circuit::Value;
+
+    let a = Fr::from(2);
+    let b = Fr::from(3);
+    let sum = a + b;
+
+    let circuit = ReferenceCircuit { a: Value::known(a), b: Value::known(b) };
+    let inputs: Vec<Vec<Fr>> = vec![vec![sum]];
+
+    let params = ParamsKZG::<Bn256>::setup(REFERENCE_K, OsRng);
+    let vk = keygen_vk(&params, &ReferenceCircuit::default()).context("keygen_vk")?;
+    let pk = keygen_pk(&params, vk.clone(), &ReferenceCircuit::default()).context("keygen_pk")?;
+
+    let instances: Vec<&[Fr]> = inputs.iter().map(|v| v.as_slice()).collect();
+
+    let mut transcript =
+        Keccak256Write::<Vec<u8>, G1Affine, Challenge255<G1Affine>>::init(vec![]);
+    create_proof::<KZGCommitmentScheme<Bn256>, ProverSHPLONK<'_, Bn256>, _, _, _, _>(
+        &params,
+        &pk,
+        &[circuit],
+        &[&instances[..]],
+        OsRng,
+        &mut transcript,
+    )
+    .context("create_proof")?;
+    let proof_bytes = transcript.finalize();
+
+    let mut params_bytes = Vec::new();
+    params.write(&mut params_bytes).context("write params")?;
+    let vk_bytes = vk.to_bytes(SerdeFormat::RawBytes);
+    let inputs_bytes = postcard::to_allocvec(&inputs).context("encode inputs")?;
+
+    Ok(ProofJob { params_bytes, vk_bytes, proof_bytes, inputs_bytes })
 }
 
 fn load_elf() -> Result<Vec<u8>> {
@@ -70,17 +128,18 @@ fn load_elf() -> Result<Vec<u8>> {
     ))
 }
 
-fn sample_vk_components() -> VkComponents {
-    VkComponents {
-        k: 4,
-        extended_k: 7,
-        omega: vec![0u8; 32],
-        num_fixed_columns: 1,
-        num_advice_columns: 1,
-        num_instance_columns: 1,
-        num_selectors: 1,
-        fixed_commitments: vec![vec![0u8; 32]],
-        permutation_commitments: vec![vec![0u8; 32]],
-        permutation_columns: vec![(0, 0)],
+fn keccak(bytes: &[u8]) -> [u8; 32] {
+    let mut h = Keccak::v256();
+    let mut out = [0u8; 32];
+    h.update(bytes);
+    h.finalize(&mut out);
+    out
+}
+
+fn hex(bytes: &[u8]) -> String {
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        s.push_str(&format!("{:02x}", b));
     }
+    s
 }

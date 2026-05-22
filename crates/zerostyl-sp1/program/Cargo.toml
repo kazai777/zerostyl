@@ -7,8 +7,12 @@ license.workspace = true
 
 [dependencies]
 sp1-zkvm = "=6.2.1"
+halo2_proofs = { version = "=0.3.0", default-features = false }
+halo2curves = { version = "0.6", default-features = false, features = ["bits", "derive_serde"] }
+zerostyl-verifier = { path = "../../zerostyl-verifier", default-features = false }
 postcard = { version = "1.1", default-features = false, features = ["alloc"] }
 serde = { version = "1.0", default-features = false, features = ["derive", "alloc"] }
+tiny-keccak = { version = "2.0", features = ["keccak"] }
 
 [[bin]]
 name = "zerostyl-sp1-program"
