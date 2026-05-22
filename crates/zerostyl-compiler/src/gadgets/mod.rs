@@ -12,7 +12,9 @@
 
 pub mod comparison;
 pub mod merkle;
+pub mod poseidon_chip;
 pub mod poseidon_commitment;
+pub mod poseidon_native;
 pub mod range;
 
 pub use comparison::{ComparisonChip, ComparisonConfig};

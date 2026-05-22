@@ -20,13 +20,15 @@
 //! small positive value, making the range check pass even though `a < b`
 //! in the integer sense.
 
-use super::range::{RangeProofChip, RangeProofConfig};
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, Value},
-    pasta::Fp,
     plonk::{Advice, Column, ConstraintSystem, Error, Expression, Selector},
     poly::Rotation,
 };
+use halo2curves::bn256::Fr;
+use halo2curves::group::ff::Field;
+
+use super::range::{RangeProofChip, RangeProofConfig};
 
 /// Configuration for the comparison chip.
 #[derive(Debug, Clone)]
@@ -51,7 +53,7 @@ impl ComparisonChip {
     ///
     /// Allocates 3 advice columns for difference computation, 2 selectors
     /// for the `>=` and `>` gates, plus the columns required by [`RangeProofChip`].
-    pub fn configure(meta: &mut ConstraintSystem<Fp>) -> ComparisonConfig {
+    pub fn configure(meta: &mut ConstraintSystem<Fr>) -> ComparisonConfig {
         let range_config = RangeProofChip::configure(meta);
 
         let left_col = meta.advice_column();
@@ -79,7 +81,7 @@ impl ComparisonChip {
             let left = meta.query_advice(left_col, Rotation::cur());
             let right = meta.query_advice(right_col, Rotation::cur());
             let diff = meta.query_advice(diff_col, Rotation::cur());
-            vec![s * (left - right - Expression::Constant(Fp::one()) - diff)]
+            vec![s * (left - right - Expression::Constant(Fr::ONE) - diff)]
         });
 
         ComparisonConfig { range_config, left_col, right_col, diff_col, gte_selector, gt_selector }
@@ -106,9 +108,9 @@ impl ComparisonChip {
     /// Returns [`Error`] if synthesis fails.
     pub fn assert_gt(
         &self,
-        mut layouter: impl Layouter<Fp>,
-        left: AssignedCell<Fp, Fp>,
-        right: AssignedCell<Fp, Fp>,
+        mut layouter: impl Layouter<Fr>,
+        left: AssignedCell<Fr, Fr>,
+        right: AssignedCell<Fr, Fr>,
         num_bits: usize,
     ) -> Result<(), Error> {
         let diff = layouter.assign_region(
@@ -117,11 +119,8 @@ impl ComparisonChip {
                 self.config.gt_selector.enable(&mut region, 0)?;
                 left.copy_advice(|| "left", &mut region, self.config.left_col, 0)?;
                 right.copy_advice(|| "right", &mut region, self.config.right_col, 0)?;
-                let diff_val = left
-                    .value()
-                    .copied()
-                    .zip(right.value().copied())
-                    .map(|(l, r)| l - r - Fp::one());
+                let diff_val =
+                    left.value().copied().zip(right.value().copied()).map(|(l, r)| l - r - Fr::ONE);
                 region.assign_advice(|| "diff", self.config.diff_col, 0, || diff_val)
             },
         )?;
@@ -145,9 +144,9 @@ impl ComparisonChip {
     /// Returns [`Error`] if synthesis fails.
     pub fn assert_gte(
         &self,
-        mut layouter: impl Layouter<Fp>,
-        left: AssignedCell<Fp, Fp>,
-        right: AssignedCell<Fp, Fp>,
+        mut layouter: impl Layouter<Fr>,
+        left: AssignedCell<Fr, Fr>,
+        right: AssignedCell<Fr, Fr>,
         num_bits: usize,
     ) -> Result<(), Error> {
         let diff = layouter.assign_region(
@@ -180,9 +179,9 @@ impl ComparisonChip {
     /// Returns [`Error`] if synthesis fails.
     pub fn assert_lt(
         &self,
-        layouter: impl Layouter<Fp>,
-        left: AssignedCell<Fp, Fp>,
-        right: AssignedCell<Fp, Fp>,
+        layouter: impl Layouter<Fr>,
+        left: AssignedCell<Fr, Fr>,
+        right: AssignedCell<Fr, Fr>,
         num_bits: usize,
     ) -> Result<(), Error> {
         self.assert_gt(layouter, right, left, num_bits)
@@ -202,9 +201,9 @@ impl ComparisonChip {
     /// Returns [`Error`] if synthesis fails.
     pub fn assert_lte(
         &self,
-        layouter: impl Layouter<Fp>,
-        left: AssignedCell<Fp, Fp>,
-        right: AssignedCell<Fp, Fp>,
+        layouter: impl Layouter<Fr>,
+        left: AssignedCell<Fr, Fr>,
+        right: AssignedCell<Fr, Fr>,
         num_bits: usize,
     ) -> Result<(), Error> {
         self.assert_gte(layouter, right, left, num_bits)
@@ -217,9 +216,9 @@ impl ComparisonChip {
     /// Returns [`Error`] if the assignment fails.
     pub fn load_value(
         &self,
-        mut layouter: impl Layouter<Fp>,
-        value: Value<Fp>,
-    ) -> Result<AssignedCell<Fp, Fp>, Error> {
+        mut layouter: impl Layouter<Fr>,
+        value: Value<Fr>,
+    ) -> Result<AssignedCell<Fr, Fr>, Error> {
         layouter.assign_region(
             || "load comparison value",
             |mut region| {
@@ -250,13 +249,13 @@ mod tests {
 
     #[derive(Clone)]
     struct ComparisonTestCircuit {
-        left: Value<Fp>,
-        right: Value<Fp>,
+        left: Value<Fr>,
+        right: Value<Fr>,
         num_bits: usize,
         op: ComparisonOp,
     }
 
-    impl Circuit<Fp> for ComparisonTestCircuit {
+    impl Circuit<Fr> for ComparisonTestCircuit {
         type Config = ComparisonConfig;
         type FloorPlanner = SimpleFloorPlanner;
 
@@ -269,14 +268,14 @@ mod tests {
             }
         }
 
-        fn configure(meta: &mut ConstraintSystem<Fp>) -> ComparisonConfig {
+        fn configure(meta: &mut ConstraintSystem<Fr>) -> ComparisonConfig {
             ComparisonChip::configure(meta)
         }
 
         fn synthesize(
             &self,
             config: ComparisonConfig,
-            mut layouter: impl Layouter<Fp>,
+            mut layouter: impl Layouter<Fr>,
         ) -> Result<(), Error> {
             let chip = ComparisonChip::construct(config);
             let left_cell = chip.load_value(layouter.namespace(|| "load left"), self.left)?;
@@ -312,8 +311,8 @@ mod tests {
 
     fn run_comparison(left: u64, right: u64, num_bits: usize, op: ComparisonOp) -> bool {
         let circuit = ComparisonTestCircuit {
-            left: Value::known(Fp::from(left)),
-            right: Value::known(Fp::from(right)),
+            left: Value::known(Fr::from(left)),
+            right: Value::known(Fr::from(right)),
             num_bits,
             op,
         };

@@ -7,10 +7,10 @@ use halo2_proofs::{
     circuit::{Layouter, SimpleFloorPlanner, Value},
     plonk::{keygen_vk, Circuit, Column, ConstraintSystem, Error},
     plonk::{Advice, Instance, Selector},
-    poly::{commitment::Params, Rotation},
+    poly::{kzg::commitment::ParamsKZG, Rotation},
 };
+use halo2curves::bn256::{Bn256, Fr};
 use halo2curves::group::ff::PrimeField;
-use halo2curves::pasta::{EqAffine, Fp};
 use regex::Regex;
 use std::fs::File;
 use std::io::Write;
@@ -30,15 +30,15 @@ struct TxPrivacyConfig {
 
 #[derive(Clone, Debug, Default)]
 struct TxPrivacyCircuit {
-    balance_old: Value<Fp>,
-    balance_new: Value<Fp>,
-    randomness_old: Value<Fp>,
-    randomness_new: Value<Fp>,
-    amount: Value<Fp>,
-    merkle_path: Vec<Value<Fp>>,
+    balance_old: Value<Fr>,
+    balance_new: Value<Fr>,
+    randomness_old: Value<Fr>,
+    randomness_new: Value<Fr>,
+    amount: Value<Fr>,
+    merkle_path: Vec<Value<Fr>>,
 }
 
-impl Circuit<Fp> for TxPrivacyCircuit {
+impl Circuit<Fr> for TxPrivacyCircuit {
     type Config = TxPrivacyConfig;
     type FloorPlanner = SimpleFloorPlanner;
 
@@ -46,7 +46,7 @@ impl Circuit<Fp> for TxPrivacyCircuit {
         Self::default()
     }
 
-    fn configure(meta: &mut ConstraintSystem<Fp>) -> Self::Config {
+    fn configure(meta: &mut ConstraintSystem<Fr>) -> Self::Config {
         let advice = [meta.advice_column(), meta.advice_column(), meta.advice_column()];
         let instance = meta.instance_column();
 
@@ -89,7 +89,7 @@ impl Circuit<Fp> for TxPrivacyCircuit {
         TxPrivacyConfig { advice, instance, s_commitment, s_balance_check, s_merkle }
     }
 
-    fn synthesize(&self, _config: Self::Config, _layouter: impl Layouter<Fp>) -> Result<(), Error> {
+    fn synthesize(&self, _config: Self::Config, _layouter: impl Layouter<Fr>) -> Result<(), Error> {
         Ok(())
     }
 }
@@ -143,7 +143,7 @@ fn main() -> std::io::Result<()> {
     let k = 10;
 
     println!("Generating params and VK...");
-    let params = Params::<EqAffine>::new(k);
+    let params = ParamsKZG::<Bn256>::setup(k, rand::rngs::OsRng);
 
     let circuit = TxPrivacyCircuit {
         balance_old: Value::unknown(),

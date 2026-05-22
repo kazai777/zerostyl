@@ -1,17 +1,17 @@
 //! Embedded verification key and parameters
 //!
-//! When the `embedded_vk` feature is enabled, IPA params are embedded
+//! When the `embedded_vk` feature is enabled, KZG params are embedded
 //! at compile time via build.rs. The VK is regenerated at runtime
-//! via `keygen_vk` because halo2_proofs 0.3.2 lacks VK serialization.
+//! via `keygen_vk` because halo2_proofs 0.3.0 lacks VK serialization.
 
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 
 use halo2_proofs::{
     plonk::{keygen_vk, VerifyingKey},
-    poly::commitment::Params,
+    poly::{commitment::Params, kzg::commitment::ParamsKZG},
 };
-use halo2curves::pasta::EqAffine;
+use halo2curves::bn256::{Bn256, G1Affine};
 
 use crate::reference_circuit::ReferenceCircuit;
 
@@ -26,12 +26,12 @@ pub fn embedded_params_bytes() -> &'static [u8] {
 }
 
 /// Load the embedded commitment parameters
-pub fn load_embedded_params() -> Result<Params<EqAffine>, VerifyError> {
+pub fn load_embedded_params() -> Result<ParamsKZG<Bn256>, VerifyError> {
     if PARAMS_BYTES.is_empty() {
         return Err(Vec::from(b"Embedded params are empty"));
     }
 
-    Params::read(&mut &PARAMS_BYTES[..]).map_err(|e| {
+    ParamsKZG::<Bn256>::read(&mut &PARAMS_BYTES[..]).map_err(|e| {
         let msg = format!("Failed to deserialize embedded params: {:?}", e);
         Vec::from(msg.as_bytes())
     })
@@ -39,9 +39,9 @@ pub fn load_embedded_params() -> Result<Params<EqAffine>, VerifyError> {
 
 /// Regenerate the VK from embedded params and the reference circuit.
 ///
-/// halo2_proofs 0.3.2 does not support VK serialization, so the VK
+/// halo2_proofs 0.3.0 does not support VK serialization, so the VK
 /// is regenerated at runtime using `keygen_vk`.
-pub fn load_embedded_vk() -> Result<VerifyingKey<EqAffine>, VerifyError> {
+pub fn load_embedded_vk() -> Result<VerifyingKey<G1Affine>, VerifyError> {
     let params = load_embedded_params()?;
     let circuit = ReferenceCircuit::default();
     keygen_vk(&params, &circuit).map_err(|e| {

@@ -9,8 +9,8 @@
 //!
 //! Uses NativeProver from zerostyl-compiler for REAL cryptographic proof generation.
 
+use halo2curves::bn256::Fr;
 use halo2curves::ff::PrimeField;
-use halo2curves::pasta::Fp;
 use state_mask::{StateMaskCircuit, COLLATERAL_MAX, COLLATERAL_MIN};
 use std::time::Instant;
 use tempfile::TempDir;
@@ -22,7 +22,7 @@ fn main() {
     println!("Using NativeProver for REAL cryptographic proof generation\n");
 
     let state_value = 1000u64;
-    let nonce = Fp::from(42u64);
+    let nonce = Fr::from(42u64);
     let collateral_ratio = 200u64;
     let hidden_balance = 5000u64;
     let threshold = 1000u64;
@@ -33,7 +33,7 @@ fn main() {
     println!("  - Hidden balance: {} tokens", hidden_balance);
     println!();
 
-    let commitment = StateMaskCircuit::compute_commitment(Fp::from(state_value), nonce);
+    let commitment = StateMaskCircuit::compute_commitment(Fr::from(state_value), nonce);
 
     println!("PUBLIC outputs (what the verifier sees):");
     println!(
@@ -75,7 +75,7 @@ fn main() {
 
     println!("PROOF GENERATION:");
     let proof_start = Instant::now();
-    let public_inputs = vec![vec![commitment, Fp::from(threshold)]];
+    let public_inputs = vec![vec![commitment, Fr::from(threshold)]];
     let proof = prover.generate_proof(&public_inputs).expect("Failed to generate proof");
     let proof_elapsed = proof_start.elapsed();
 

@@ -1,70 +1,68 @@
-//! Native Prover for halo2 Circuits
+//! Native Prover for halo2-KZG circuits on BN254.
 //!
-//! Provides off-chain proof generation using the full halo2_proofs library.
-//! Proofs are generated natively (not in WASM) for optimal performance.
+//! Off-chain proof generation using halo2_proofs (PSE fork). Produces KZG-BN254
+//! proofs with a Keccak-256 Fiat-Shamir transcript for downstream EVM/Stylus
+//! verifier compatibility.
 
-use super::keys::{KeyManager, KeyMetadata};
 use anyhow::{Context, Result};
 use halo2_proofs::{
     plonk::{create_proof, verify_proof, Circuit, ProvingKey, VerifyingKey},
-    poly::commitment::Params,
-    transcript::{Blake2bRead, Blake2bWrite, Challenge255},
+    poly::kzg::{
+        commitment::{KZGCommitmentScheme, ParamsKZG},
+        multiopen::{ProverSHPLONK, VerifierSHPLONK},
+        strategy::SingleStrategy,
+    },
+    transcript::{Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer},
 };
-use halo2curves::pasta::{EqAffine, Fp};
+use halo2curves::bn256::{Bn256, Fr, G1Affine};
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-/// Serializable proof data containing the raw proof bytes and public inputs as hex strings.
+use super::keys::{KeyManager, KeyMetadata};
+
+type ProofTranscriptWrite =
+    halo2_proofs::transcript::Keccak256Write<Vec<u8>, G1Affine, Challenge255<G1Affine>>;
+type ProofTranscriptRead<'a> =
+    halo2_proofs::transcript::Keccak256Read<&'a [u8], G1Affine, Challenge255<G1Affine>>;
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ProofData {
-    /// Raw halo2 proof bytes.
     pub proof_bytes: Vec<u8>,
-    /// Public inputs as hex-encoded field element strings.
     pub public_inputs: Vec<Vec<String>>,
 }
 
-/// Native (off-chain) halo2 prover with key caching.
-pub struct NativeProver<C: Circuit<Fp>> {
+pub struct NativeProver<C: Circuit<Fr>> {
     circuit: C,
     k: u32,
     key_manager: KeyManager,
-    proving_key: Option<ProvingKey<EqAffine>>,
-    verifying_key: Option<VerifyingKey<EqAffine>>,
-    params: Option<Params<EqAffine>>,
+    proving_key: Option<ProvingKey<G1Affine>>,
+    verifying_key: Option<VerifyingKey<G1Affine>>,
+    params: Option<ParamsKZG<Bn256>>,
 }
 
-impl<C: Circuit<Fp> + Clone> NativeProver<C> {
-    /// Create a new prover with default cache directory (`.zerostyl_cache`).
+impl<C: Circuit<Fr> + Clone> NativeProver<C> {
     pub fn new(circuit: C, k: u32) -> Result<Self> {
         let cache_dir = std::env::current_dir()?.join(".zerostyl_cache");
         let key_manager = KeyManager::new(&cache_dir)?;
-
         Ok(Self { circuit, k, key_manager, proving_key: None, verifying_key: None, params: None })
     }
 
-    /// Create a new prover with a custom cache directory.
     pub fn with_cache_dir<P: AsRef<Path>>(circuit: C, k: u32, cache_dir: P) -> Result<Self> {
         let key_manager = KeyManager::new(cache_dir)?;
-
         Ok(Self { circuit, k, key_manager, proving_key: None, verifying_key: None, params: None })
     }
 
-    /// Generate IPA params, proving key, and verifying key. Must be called before proving.
     pub fn setup(&mut self, metadata: KeyMetadata) -> Result<()> {
         let params = self.key_manager.generate_params(self.k)?;
-
         let (pk, vk) = self.key_manager.generate_keys(&self.circuit, self.k, metadata)?;
-
         self.params = Some(params);
         self.proving_key = Some(pk);
         self.verifying_key = Some(vk);
-
         Ok(())
     }
 
-    /// Generate a halo2 proof for the circuit with the given public inputs.
-    pub fn generate_proof(&self, public_inputs: &[Vec<Fp>]) -> Result<Vec<u8>> {
+    pub fn generate_proof(&self, public_inputs: &[Vec<Fr>]) -> Result<Vec<u8>> {
         let pk = self
             .proving_key
             .as_ref()
@@ -75,12 +73,12 @@ impl<C: Circuit<Fp> + Clone> NativeProver<C> {
             .as_ref()
             .context("Parameters not loaded. Call setup() or load_keys() first.")?;
 
-        let mut transcript = Blake2bWrite::<_, EqAffine, Challenge255<_>>::init(vec![]);
+        let mut transcript = ProofTranscriptWrite::init(vec![]);
 
-        let instances: Vec<&[Fp]> = public_inputs.iter().map(|v| v.as_slice()).collect();
-        let instances_slice: &[&[Fp]] = &instances;
+        let instances: Vec<&[Fr]> = public_inputs.iter().map(|v| v.as_slice()).collect();
+        let instances_slice: &[&[Fr]] = &instances;
 
-        create_proof(
+        create_proof::<KZGCommitmentScheme<Bn256>, ProverSHPLONK<'_, Bn256>, _, _, _, _>(
             params,
             pk,
             std::slice::from_ref(&self.circuit),
@@ -93,10 +91,7 @@ impl<C: Circuit<Fp> + Clone> NativeProver<C> {
         Ok(transcript.finalize())
     }
 
-    /// Verify a proof against the given public inputs. Returns `true` if valid.
-    pub fn verify_proof(&self, proof: &[u8], public_inputs: &[Vec<Fp>]) -> Result<bool> {
-        use halo2_proofs::plonk::SingleVerifier;
-
+    pub fn verify_proof(&self, proof: &[u8], public_inputs: &[Vec<Fr>]) -> Result<bool> {
         let vk = self
             .verifying_key
             .as_ref()
@@ -104,47 +99,49 @@ impl<C: Circuit<Fp> + Clone> NativeProver<C> {
 
         let params = self.params.as_ref().context("Parameters not loaded. Call setup() first.")?;
 
-        let mut transcript = Blake2bRead::<_, EqAffine, Challenge255<_>>::init(proof);
+        let mut transcript = ProofTranscriptRead::init(proof);
 
-        let instances: Vec<&[Fp]> = public_inputs.iter().map(|v| v.as_slice()).collect();
-        let instances_slice: &[&[Fp]] = &instances;
+        let instances: Vec<&[Fr]> = public_inputs.iter().map(|v| v.as_slice()).collect();
+        let instances_slice: &[&[Fr]] = &instances;
 
-        let strategy = SingleVerifier::new(params);
+        let strategy = SingleStrategy::new(params);
 
-        verify_proof(params, vk, strategy, &[instances_slice], &mut transcript)
-            .map(|_| true)
-            .or_else(|_| Ok(false))
+        verify_proof::<KZGCommitmentScheme<Bn256>, VerifierSHPLONK<'_, Bn256>, _, _, _>(
+            params,
+            vk,
+            strategy,
+            &[instances_slice],
+            &mut transcript,
+        )
+        .map(|_| true)
+        .or_else(|_| Ok(false))
     }
 
-    /// Returns the proving key if `setup()` has been called.
-    pub fn proving_key(&self) -> Option<&ProvingKey<EqAffine>> {
+    pub fn proving_key(&self) -> Option<&ProvingKey<G1Affine>> {
         self.proving_key.as_ref()
     }
 
-    /// Returns the verifying key if `setup()` has been called.
-    pub fn verifying_key(&self) -> Option<&VerifyingKey<EqAffine>> {
+    pub fn verifying_key(&self) -> Option<&VerifyingKey<G1Affine>> {
         self.verifying_key.as_ref()
     }
 }
 
-/// Format a field element as a Debug string.
-pub fn field_to_string(f: &Fp) -> String {
+pub fn field_to_string(f: &Fr) -> String {
     format!("{:?}", f)
 }
 
-/// Parse a field element from a decimal or hex (`0x`-prefixed) string.
-pub fn string_to_field(s: &str) -> Result<Fp> {
+pub fn string_to_field(s: &str) -> Result<Fr> {
     use halo2curves::group::ff::PrimeField;
 
     if let Some(hex_str) = s.strip_prefix("0x") {
         let bytes = hex::decode(hex_str).context("Invalid hex string")?;
-        let mut repr = <Fp as PrimeField>::Repr::default();
+        let mut repr = <Fr as PrimeField>::Repr::default();
         let len = bytes.len().min(repr.as_ref().len());
         repr.as_mut()[..len].copy_from_slice(&bytes[..len]);
-        Option::from(Fp::from_repr(repr)).ok_or_else(|| anyhow::anyhow!("Invalid field element"))
+        Option::from(Fr::from_repr(repr)).ok_or_else(|| anyhow::anyhow!("Invalid field element"))
     } else {
         let val: u64 = s.parse().context("Invalid field element string")?;
-        Ok(Fp::from(val))
+        Ok(Fr::from(val))
     }
 }
 
@@ -160,8 +157,8 @@ mod tests {
 
     #[derive(Clone, Debug)]
     struct SimpleCircuit {
-        a: Value<Fp>,
-        b: Value<Fp>,
+        a: Value<Fr>,
+        b: Value<Fr>,
     }
 
     #[derive(Clone, Debug)]
@@ -172,7 +169,7 @@ mod tests {
         selector: Selector,
     }
 
-    impl Circuit<Fp> for SimpleCircuit {
+    impl Circuit<Fr> for SimpleCircuit {
         type Config = SimpleConfig;
         type FloorPlanner = SimpleFloorPlanner;
 
@@ -180,7 +177,7 @@ mod tests {
             Self { a: Value::unknown(), b: Value::unknown() }
         }
 
-        fn configure(meta: &mut ConstraintSystem<Fp>) -> Self::Config {
+        fn configure(meta: &mut ConstraintSystem<Fr>) -> Self::Config {
             let advice = meta.advice_column();
             let instance = meta.instance_column();
             let selector = meta.selector();
@@ -203,16 +200,14 @@ mod tests {
         fn synthesize(
             &self,
             config: Self::Config,
-            mut layouter: impl Layouter<Fp>,
+            mut layouter: impl Layouter<Fr>,
         ) -> Result<(), Error> {
             layouter.assign_region(
                 || "add",
                 |mut region| {
                     config.selector.enable(&mut region, 0)?;
-
                     region.assign_advice(|| "a", config.advice, 0, || self.a)?;
                     region.assign_advice(|| "b", config.advice, 1, || self.b)?;
-
                     Ok(())
                 },
             )
@@ -222,7 +217,7 @@ mod tests {
     #[test]
     fn test_prover_setup() {
         let temp_dir = TempDir::new().unwrap();
-        let circuit = SimpleCircuit { a: Value::known(Fp::from(2)), b: Value::known(Fp::from(3)) };
+        let circuit = SimpleCircuit { a: Value::known(Fr::from(2)), b: Value::known(Fr::from(3)) };
 
         let mut prover = NativeProver::with_cache_dir(circuit, 4, temp_dir.path()).unwrap();
 
@@ -242,7 +237,7 @@ mod tests {
     #[test]
     fn test_proof_generation_and_verification() {
         let temp_dir = TempDir::new().unwrap();
-        let circuit = SimpleCircuit { a: Value::known(Fp::from(2)), b: Value::known(Fp::from(3)) };
+        let circuit = SimpleCircuit { a: Value::known(Fr::from(2)), b: Value::known(Fr::from(3)) };
 
         let mut prover = NativeProver::with_cache_dir(circuit, 4, temp_dir.path()).unwrap();
 
@@ -255,7 +250,7 @@ mod tests {
 
         prover.setup(metadata).unwrap();
 
-        let public_inputs = vec![vec![Fp::from(5)]];
+        let public_inputs = vec![vec![Fr::from(5)]];
         let proof = prover.generate_proof(&public_inputs).unwrap();
 
         assert!(!proof.is_empty());
@@ -267,7 +262,7 @@ mod tests {
     #[test]
     fn test_invalid_proof_rejected() {
         let temp_dir = TempDir::new().unwrap();
-        let circuit = SimpleCircuit { a: Value::known(Fp::from(2)), b: Value::known(Fp::from(3)) };
+        let circuit = SimpleCircuit { a: Value::known(Fr::from(2)), b: Value::known(Fr::from(3)) };
 
         let mut prover = NativeProver::with_cache_dir(circuit, 4, temp_dir.path()).unwrap();
 
@@ -280,17 +275,17 @@ mod tests {
 
         prover.setup(metadata).unwrap();
 
-        let public_inputs = vec![vec![Fp::from(5)]];
+        let public_inputs = vec![vec![Fr::from(5)]];
         let proof = prover.generate_proof(&public_inputs).unwrap();
 
-        let wrong_inputs = vec![vec![Fp::from(10)]];
+        let wrong_inputs = vec![vec![Fr::from(10)]];
         let is_valid = prover.verify_proof(&proof, &wrong_inputs).unwrap();
         assert!(!is_valid);
     }
 
     #[test]
     fn test_field_serialization() {
-        let field = Fp::from(12345);
+        let field = Fr::from(12345);
         let s = field_to_string(&field);
         assert!(!s.is_empty());
 
@@ -301,29 +296,28 @@ mod tests {
     #[test]
     fn test_string_to_field_hex() {
         let result = string_to_field("0x1a").unwrap();
-        assert_eq!(result, Fp::from(26));
+        assert_eq!(result, Fr::from(26));
 
         let result2 = string_to_field("0xFF").unwrap();
-        assert_eq!(result2, Fp::from(255));
+        assert_eq!(result2, Fr::from(255));
     }
 
     #[test]
     fn test_string_to_field_decimal() {
         let result = string_to_field("42").unwrap();
-        assert_eq!(result, Fp::from(42));
+        assert_eq!(result, Fr::from(42));
 
         let result2 = string_to_field("999").unwrap();
-        assert_eq!(result2, Fp::from(999));
+        assert_eq!(result2, Fr::from(999));
     }
 
     #[test]
     fn test_string_to_field_zero() {
         let result = string_to_field("0").unwrap();
-        assert_eq!(result, Fp::from(0));
+        assert_eq!(result, Fr::from(0));
 
-        // Hex needs even number of digits, so use "0x00" instead of "0x0"
         let result2 = string_to_field("0x00").unwrap();
-        assert_eq!(result2, Fp::from(0));
+        assert_eq!(result2, Fr::from(0));
     }
 
     #[test]
@@ -331,7 +325,6 @@ mod tests {
         assert!(string_to_field("invalid").is_err());
         assert!(string_to_field("").is_err());
         assert!(string_to_field("0xGG").is_err());
-        // Odd number of hex digits should also fail
         assert!(string_to_field("0x0").is_err());
     }
 
@@ -339,9 +332,8 @@ mod tests {
     fn test_field_to_string_not_empty() {
         let values = vec![0u64, 1, 42, 255, 1000, 999999];
         for val in values {
-            let field = Fp::from(val);
+            let field = Fr::from(val);
             let s = field_to_string(&field);
-            // Just verify it produces a non-empty string
             assert!(!s.is_empty(), "String should not be empty for value {}", val);
         }
     }
@@ -349,11 +341,11 @@ mod tests {
     #[test]
     fn test_prover_without_setup() {
         let temp_dir = TempDir::new().unwrap();
-        let circuit = SimpleCircuit { a: Value::known(Fp::from(2)), b: Value::known(Fp::from(3)) };
+        let circuit = SimpleCircuit { a: Value::known(Fr::from(2)), b: Value::known(Fr::from(3)) };
 
         let prover = NativeProver::with_cache_dir(circuit, 4, temp_dir.path()).unwrap();
 
-        let public_inputs = vec![vec![Fp::from(5)]];
+        let public_inputs = vec![vec![Fr::from(5)]];
         let result = prover.generate_proof(&public_inputs);
         assert!(result.is_err());
     }
@@ -363,7 +355,7 @@ mod tests {
         for k in [4, 5, 6] {
             let temp_dir = TempDir::new().unwrap();
             let circuit =
-                SimpleCircuit { a: Value::known(Fp::from(2)), b: Value::known(Fp::from(3)) };
+                SimpleCircuit { a: Value::known(Fr::from(2)), b: Value::known(Fr::from(3)) };
 
             let mut prover = NativeProver::with_cache_dir(circuit, k, temp_dir.path()).unwrap();
 
@@ -381,7 +373,7 @@ mod tests {
 
     #[test]
     fn test_prover_new() {
-        let circuit = SimpleCircuit { a: Value::known(Fp::from(2)), b: Value::known(Fp::from(3)) };
+        let circuit = SimpleCircuit { a: Value::known(Fr::from(2)), b: Value::known(Fr::from(3)) };
         let prover = NativeProver::new(circuit, 4).unwrap();
         assert!(prover.proving_key().is_none());
         assert!(prover.verifying_key().is_none());
@@ -390,11 +382,11 @@ mod tests {
     #[test]
     fn test_prover_verify_without_setup() {
         let temp_dir = TempDir::new().unwrap();
-        let circuit = SimpleCircuit { a: Value::known(Fp::from(2)), b: Value::known(Fp::from(3)) };
+        let circuit = SimpleCircuit { a: Value::known(Fr::from(2)), b: Value::known(Fr::from(3)) };
 
         let prover = NativeProver::with_cache_dir(circuit, 4, temp_dir.path()).unwrap();
 
-        let public_inputs = vec![vec![Fp::from(5)]];
+        let public_inputs = vec![vec![Fr::from(5)]];
         let fake_proof = vec![0u8; 100];
         let result = prover.verify_proof(&fake_proof, &public_inputs);
         assert!(result.is_err());

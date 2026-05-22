@@ -39,4 +39,7 @@ codegen-units = 1
 panic = "abort"
 strip = true
 
+[patch.crates-io]
+halo2_proofs = { git = "https://github.com/privacy-scaling-explorations/halo2.git", tag = "v0.3.0" }
+
 [workspace.dependencies]

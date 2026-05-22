@@ -7,7 +7,7 @@
 //! 4. Verify the circuit with MockProver
 
 use halo2_proofs::dev::MockProver;
-use halo2curves::pasta::Fp;
+use halo2curves::bn256::Fr;
 use zerostyl_compiler::{parse_contract, transform_to_ir, CircuitBuilder};
 
 fn main() {
@@ -54,11 +54,11 @@ fn main() {
     println!("STEP 4: Build halo2 circuit");
     println!("───────────────────────────");
     let circuit = CircuitBuilder::new(ir)
-        .build::<Fp>()
+        .build::<Fr>()
         .with_witnesses(vec![
-            Fp::from(1000), // sender_balance
-            Fp::from(300),  // amount
-            Fp::from(500),  // recipient_balance
+            Fr::from(1000), // sender_balance
+            Fr::from(300),  // amount
+            Fr::from(500),  // recipient_balance
         ])
         .expect("Failed to set witnesses");
 
@@ -70,7 +70,7 @@ fn main() {
     println!("STEP 5: Verify circuit constraints");
     println!("──────────────────────────────────");
     let k = 10;
-    let public_inputs: Vec<Fp> = vec![];
+    let public_inputs: Vec<Fr> = vec![];
 
     let prover = MockProver::run(k, &circuit, vec![public_inputs]).expect("MockProver failed");
     prover.verify().expect("Circuit verification failed");

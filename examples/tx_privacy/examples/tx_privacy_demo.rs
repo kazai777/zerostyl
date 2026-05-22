@@ -5,8 +5,8 @@
 //!
 //! Uses NativeProver from zerostyl-compiler for REAL cryptographic proof generation.
 
+use halo2curves::bn256::Fr;
 use halo2curves::ff::PrimeField;
-use halo2curves::pasta::Fp;
 use std::time::Instant;
 use tempfile::TempDir;
 use tx_privacy::{TxPrivacyCircuit, MERKLE_DEPTH};
@@ -20,9 +20,9 @@ fn main() {
     let balance_old = 1000u64;
     let balance_new = 700u64;
     let amount = 300u64;
-    let randomness_old = Fp::from(42);
-    let randomness_new = Fp::from(84);
-    let siblings: Vec<Fp> = (0..MERKLE_DEPTH).map(|i| Fp::from((i + 100) as u64)).collect();
+    let randomness_old = Fr::from(42);
+    let randomness_new = Fr::from(84);
+    let siblings: Vec<Fr> = (0..MERKLE_DEPTH).map(|i| Fr::from((i + 100) as u64)).collect();
     let indices: Vec<bool> = (0..MERKLE_DEPTH).map(|i| i % 2 == 0).collect();
 
     println!("SECRET inputs (only Alice knows):");
@@ -32,9 +32,9 @@ fn main() {
     println!();
 
     let commitment_old =
-        TxPrivacyCircuit::compute_commitment(Fp::from(balance_old), randomness_old);
+        TxPrivacyCircuit::compute_commitment(Fr::from(balance_old), randomness_old);
     let commitment_new =
-        TxPrivacyCircuit::compute_commitment(Fp::from(balance_new), randomness_new);
+        TxPrivacyCircuit::compute_commitment(Fr::from(balance_new), randomness_new);
     let merkle_root = TxPrivacyCircuit::compute_merkle_root(commitment_old, &siblings, &indices);
 
     println!("PUBLIC outputs (what the blockchain sees):");
@@ -128,7 +128,7 @@ fn main() {
         let commitment_new_bytes = commitment_new.to_repr();
         let merkle_root_bytes = merkle_root.to_repr();
 
-        // Fp::to_repr() is little-endian; reverse for big-endian (Solidity bytes32)
+        // Fr::to_repr() is little-endian; reverse for big-endian (Solidity bytes32)
         let to_bytes32 = |repr: &[u8]| -> String {
             let mut padded = [0u8; 32];
             for (i, byte) in repr.iter().enumerate() {

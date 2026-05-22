@@ -1,114 +1,87 @@
 //! Proving and Verification Key Management
 //!
 //! Handles generation and caching of proving/verification keys for halo2 circuits.
-//! Note: halo2_proofs 0.3 doesn't support stable key serialization, so we cache
-//! params and regenerate keys as needed.
+//! Note: halo2_proofs 0.3 (PSE fork) doesn't support stable VK/PK serialization, so we
+//! cache the trusted-setup parameters (ParamsKZG) and regenerate keys as needed.
 
 use anyhow::{Context, Result};
 use halo2_proofs::{
     plonk::{keygen_pk, keygen_vk, Circuit, ProvingKey, VerifyingKey},
-    poly::commitment::Params,
+    poly::{commitment::Params, kzg::commitment::ParamsKZG},
 };
-use halo2curves::pasta::{EqAffine, Fp};
+use halo2curves::bn256::{Bn256, Fr, G1Affine};
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
     path::{Path, PathBuf},
 };
 
-/// Metadata about a circuit's key configuration, stored alongside cached keys.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct KeyMetadata {
-    /// Circuit name identifier.
     pub circuit_name: String,
-    /// Circuit size parameter (rows = 2^k).
     pub k: u32,
-    /// Number of public input columns.
     pub num_public_inputs: usize,
-    /// Number of private witness columns.
     pub num_private_witnesses: usize,
 }
 
-/// Manages generation and disk caching of IPA parameters, proving keys, and verifying keys.
 pub struct KeyManager {
     cache_dir: PathBuf,
 }
 
 impl KeyManager {
-    /// Create a new key manager with the given cache directory (created if needed).
     pub fn new<P: AsRef<Path>>(cache_dir: P) -> Result<Self> {
         let cache_dir = cache_dir.as_ref().to_path_buf();
         fs::create_dir_all(&cache_dir).context("Failed to create key cache directory")?;
-
         Ok(Self { cache_dir })
     }
 
-    /// Returns the file path where IPA params for the given `k` would be cached.
     pub fn params_path(&self, k: u32) -> PathBuf {
         self.cache_dir.join(format!("params_k{}.bin", k))
     }
 
-    /// Returns the file path where key metadata for a circuit would be cached.
     pub fn metadata_path(&self, circuit_name: &str, k: u32) -> PathBuf {
         self.cache_dir.join(format!("{}_k{}_metadata.json", circuit_name, k))
     }
 
-    /// Generate or load cached IPA parameters for the given `k`.
-    pub fn generate_params(&self, k: u32) -> Result<Params<EqAffine>> {
+    pub fn generate_params(&self, k: u32) -> Result<ParamsKZG<Bn256>> {
         let params_path = self.params_path(k);
 
         if params_path.exists() {
-            println!("Loading cached IPA parameters for k={}...", k);
             return self.load_params(k);
         }
 
-        println!("Generating IPA parameters for k={}... (this may take a while)", k);
-        let params = Params::<EqAffine>::new(k);
-
+        let params = ParamsKZG::<Bn256>::setup(k, rand::rngs::OsRng);
         self.save_params(&params, k)?;
-
         Ok(params)
     }
 
-    fn save_params(&self, params: &Params<EqAffine>, k: u32) -> Result<()> {
+    fn save_params(&self, params: &ParamsKZG<Bn256>, k: u32) -> Result<()> {
         let path = self.params_path(k);
         let mut file = fs::File::create(&path)
             .context(format!("Failed to create params file at {:?}", path))?;
-
         params.write(&mut file).context("Failed to write params")?;
-
-        println!("Saved IPA parameters to {:?}", path);
         Ok(())
     }
 
-    /// Load previously cached IPA parameters for the given `k`.
-    pub fn load_params(&self, k: u32) -> Result<Params<EqAffine>> {
+    pub fn load_params(&self, k: u32) -> Result<ParamsKZG<Bn256>> {
         let path = self.params_path(k);
         let mut file =
             fs::File::open(&path).context(format!("Failed to open params file at {:?}", path))?;
-
-        Params::<EqAffine>::read(&mut file).context("Failed to deserialize params")
+        ParamsKZG::<Bn256>::read(&mut file).context("Failed to deserialize params")
     }
 
-    /// Generate proving and verifying keys for a circuit, caching params and metadata.
     pub fn generate_keys<C>(
         &self,
         circuit: &C,
         k: u32,
         metadata: KeyMetadata,
-    ) -> Result<(ProvingKey<EqAffine>, VerifyingKey<EqAffine>)>
+    ) -> Result<(ProvingKey<G1Affine>, VerifyingKey<G1Affine>)>
     where
-        C: Circuit<Fp>,
+        C: Circuit<Fr>,
     {
         let params = self.generate_params(k)?;
 
-        println!(
-            "Generating proving and verification keys for circuit '{}'...",
-            metadata.circuit_name
-        );
-
         let vk = keygen_vk(&params, circuit).context("Failed to generate verification key")?;
-
         let pk =
             keygen_pk(&params, vk.clone(), circuit).context("Failed to generate proving key")?;
 
@@ -119,22 +92,16 @@ impl KeyManager {
 
     fn save_metadata(&self, metadata: &KeyMetadata) -> Result<()> {
         let meta_path = self.metadata_path(&metadata.circuit_name, metadata.k);
-
         let metadata_json =
             serde_json::to_string_pretty(metadata).context("Failed to serialize metadata")?;
         fs::write(&meta_path, metadata_json).context("Failed to write metadata file")?;
-
-        println!("Saved metadata to {:?}", meta_path);
-
         Ok(())
     }
 
-    /// Load previously saved key metadata for a circuit.
     pub fn load_metadata(&self, circuit_name: &str, k: u32) -> Result<KeyMetadata> {
         let meta_path = self.metadata_path(circuit_name, k);
         let content = fs::read_to_string(&meta_path)
             .context(format!("Failed to read metadata file at {:?}", meta_path))?;
-
         serde_json::from_str(&content).context("Failed to deserialize metadata")
     }
 }
@@ -150,7 +117,6 @@ mod tests {
         let manager = KeyManager::new(temp_dir.path()).unwrap();
 
         assert_eq!(manager.params_path(10), temp_dir.path().join("params_k10.bin"));
-
         assert_eq!(
             manager.metadata_path("test_circuit", 10),
             temp_dir.path().join("test_circuit_k10_metadata.json")
@@ -205,7 +171,6 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let manager = KeyManager::new(temp_dir.path()).unwrap();
 
-        // Try to load params that haven't been generated yet
         let result = manager.load_params(20);
         assert!(result.is_err());
     }
@@ -234,13 +199,8 @@ mod tests {
         let manager = KeyManager::new(temp_dir.path()).unwrap();
 
         let k = 5;
-
-        // Generate params first time
         let params1 = manager.generate_params(k).unwrap();
-
-        // Load params (should use cached version)
         let params2 = manager.load_params(k).unwrap();
-
         assert_eq!(params1.k(), params2.k());
     }
 
@@ -263,7 +223,6 @@ mod tests {
         let manager = KeyManager::new(&cache_path).unwrap();
         assert!(cache_path.exists());
 
-        // Verify we can generate params in the new directory
         let params = manager.generate_params(4).unwrap();
         assert_eq!(params.k(), 4);
     }

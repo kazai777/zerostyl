@@ -50,7 +50,7 @@ impl ZeroStylVerifier {
             #[cfg(not(feature = "std"))]
             {
                 // In no_std mode, use verifier_nostd directly with raw deserialization
-                let inputs: Vec<Vec<halo2curves::pasta::Fp>> =
+                let inputs: Vec<Vec<halo2curves::bn256::Fr>> =
                     postcard::from_bytes(&public_inputs.0)
                         .map_err(|_| Vec::from(b"Failed to deserialize public inputs"))?;
                 crate::verifier_nostd::verify_with_vk_and_params(&proof.0, &inputs, &vk, &params)

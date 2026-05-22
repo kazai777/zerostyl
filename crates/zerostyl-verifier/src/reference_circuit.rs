@@ -8,10 +8,10 @@
 
 use halo2_proofs::{
     circuit::{Layouter, SimpleFloorPlanner, Value},
-    pasta::Fp,
     plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Instance, Selector},
     poly::Rotation,
 };
+use halo2curves::bn256::Fr;
 
 /// Circuit size parameter for the reference circuit.
 pub const REFERENCE_K: u32 = 4;
@@ -22,8 +22,8 @@ pub const REFERENCE_K: u32 = 4;
 /// - `sum` is a public input (instance column, row 0)
 #[derive(Clone, Debug)]
 pub struct ReferenceCircuit {
-    pub a: Value<Fp>,
-    pub b: Value<Fp>,
+    pub a: Value<Fr>,
+    pub b: Value<Fr>,
 }
 
 impl Default for ReferenceCircuit {
@@ -40,7 +40,7 @@ pub struct ReferenceConfig {
     selector: Selector,
 }
 
-impl Circuit<Fp> for ReferenceCircuit {
+impl Circuit<Fr> for ReferenceCircuit {
     type Config = ReferenceConfig;
     type FloorPlanner = SimpleFloorPlanner;
 
@@ -48,7 +48,7 @@ impl Circuit<Fp> for ReferenceCircuit {
         Self::default()
     }
 
-    fn configure(meta: &mut ConstraintSystem<Fp>) -> Self::Config {
+    fn configure(meta: &mut ConstraintSystem<Fr>) -> Self::Config {
         let advice = meta.advice_column();
         let instance = meta.instance_column();
         let selector = meta.selector();
@@ -71,7 +71,7 @@ impl Circuit<Fp> for ReferenceCircuit {
     fn synthesize(
         &self,
         config: Self::Config,
-        mut layouter: impl Layouter<Fp>,
+        mut layouter: impl Layouter<Fr>,
     ) -> Result<(), Error> {
         layouter.assign_region(
             || "add",
@@ -88,14 +88,15 @@ impl Circuit<Fp> for ReferenceCircuit {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use halo2_proofs::{dev::MockProver, pasta::Fp};
+    use halo2_proofs::dev::MockProver;
+    use halo2curves::bn256::Fr;
 
     #[test]
     fn test_reference_circuit_valid() {
         let circuit =
-            ReferenceCircuit { a: Value::known(Fp::from(2)), b: Value::known(Fp::from(3)) };
+            ReferenceCircuit { a: Value::known(Fr::from(2)), b: Value::known(Fr::from(3)) };
 
-        let public_inputs = vec![Fp::from(5)];
+        let public_inputs = vec![Fr::from(5)];
         let prover =
             MockProver::run(REFERENCE_K, &circuit, vec![public_inputs]).expect("MockProver failed");
         prover.verify().expect("Valid proof should verify");
@@ -104,9 +105,9 @@ mod tests {
     #[test]
     fn test_reference_circuit_wrong_sum() {
         let circuit =
-            ReferenceCircuit { a: Value::known(Fp::from(2)), b: Value::known(Fp::from(3)) };
+            ReferenceCircuit { a: Value::known(Fr::from(2)), b: Value::known(Fr::from(3)) };
 
-        let wrong_inputs = vec![Fp::from(10)]; // 2 + 3 != 10
+        let wrong_inputs = vec![Fr::from(10)]; // 2 + 3 != 10
         let prover =
             MockProver::run(REFERENCE_K, &circuit, vec![wrong_inputs]).expect("MockProver failed");
         assert!(prover.verify().is_err(), "Wrong sum should be rejected");
@@ -115,9 +116,9 @@ mod tests {
     #[test]
     fn test_reference_circuit_zero_values() {
         let circuit =
-            ReferenceCircuit { a: Value::known(Fp::from(0)), b: Value::known(Fp::from(0)) };
+            ReferenceCircuit { a: Value::known(Fr::from(0)), b: Value::known(Fr::from(0)) };
 
-        let public_inputs = vec![Fp::from(0)]; // 0 + 0 = 0
+        let public_inputs = vec![Fr::from(0)]; // 0 + 0 = 0
         let prover =
             MockProver::run(REFERENCE_K, &circuit, vec![public_inputs]).expect("MockProver failed");
         prover.verify().expect("Zero values should verify");

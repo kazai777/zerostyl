@@ -1,6 +1,6 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use halo2_proofs::dev::MockProver;
-use halo2curves::pasta::Fp;
+use halo2curves::bn256::Fr as Fp;
 use tx_privacy::{TxPrivacyCircuit, MERKLE_DEPTH};
 
 fn benchmark_tx_privacy_circuit(c: &mut Criterion) {

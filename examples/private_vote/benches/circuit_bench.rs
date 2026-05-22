@@ -9,7 +9,7 @@
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use halo2_proofs::dev::MockProver;
-use halo2curves::pasta::Fp;
+use halo2curves::bn256::Fr as Fp;
 use private_vote::PrivateVoteCircuit;
 
 fn bench_private_vote_mock(c: &mut Criterion) {

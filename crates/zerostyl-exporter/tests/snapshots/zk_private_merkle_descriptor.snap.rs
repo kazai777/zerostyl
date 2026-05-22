@@ -5,7 +5,7 @@ use halo2_proofs::{
     dev::{MockProver, VerifyFailure},
     plonk::{Circuit, ConstraintSystem},
 };
-use halo2curves::pasta::Fp;
+use halo2curves::bn256::Fr;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::sync::OnceLock;
@@ -37,14 +37,14 @@ struct PublicInputsJson {
 }
 struct ParsedInputs {
     circuit: ClaimCircuit,
-    public_inputs: Vec<Vec<Fp>>,
+    public_inputs: Vec<Vec<Fr>>,
 }
 fn parse_u64(s: &str, field: &str) -> CResult<u64> {
     s.parse::<u64>().map_err(|_| {
         CircuitError::InvalidWitness(format!("field '{field}': expected u64, got '{s}'"))
     })
 }
-fn parse_field(s: &str) -> CResult<Fp> {
+fn parse_field(s: &str) -> CResult<Fr> {
     use halo2curves::group::ff::PrimeField;
     if let Some(hex_str) = s.strip_prefix("0x") {
         let bytes = hex::decode(hex_str)
@@ -52,10 +52,10 @@ fn parse_field(s: &str) -> CResult<Fp> {
         let mut repr = [0u8; 32];
         let len = bytes.len().min(32);
         repr[..len].copy_from_slice(&bytes[..len]);
-        Option::from(Fp::from_repr(repr))
+        Option::from(Fr::from_repr(repr))
             .ok_or_else(|| CircuitError::InvalidWitness(format!("invalid field element '{s}'")))
     } else {
-        Ok(Fp::from(parse_u64(s, "field")?))
+        Ok(Fr::from(parse_u64(s, "field")?))
     }
 }
 fn parse_witness(json: &str) -> CResult<WitnessJson> {
@@ -81,8 +81,8 @@ fn build_inputs(w: &WitnessJson) -> CResult<ParsedInputs> {
         }
         other => other,
     })?;
-    let siblings: Vec<Fp> = w.siblings.iter().map(|s| parse_field(s)).collect::<CResult<_>>()?;
-    let indices: Vec<Fp> = w.indices.iter().map(|s| parse_field(s)).collect::<CResult<_>>()?;
+    let siblings: Vec<Fr> = w.siblings.iter().map(|s| parse_field(s)).collect::<CResult<_>>()?;
+    let indices: Vec<Fr> = w.indices.iter().map(|s| parse_field(s)).collect::<CResult<_>>()?;
     let leaf_commitment = PoseidonCommitmentChip::hash_outside_circuit(leaf, leaf_nonce);
     let circuit = ClaimCircuit {
         leaf: Value::known(leaf),
@@ -94,7 +94,7 @@ fn build_inputs(w: &WitnessJson) -> CResult<ParsedInputs> {
     let public_inputs = vec![vec![leaf_commitment]];
     Ok(ParsedInputs { circuit, public_inputs })
 }
-fn encode_public_inputs(inputs: &[Vec<Fp>]) -> String {
+fn encode_public_inputs(inputs: &[Vec<Fr>]) -> String {
     use halo2curves::group::ff::PrimeField;
     let rows: Vec<Vec<String>> = inputs
         .iter()
@@ -103,7 +103,7 @@ fn encode_public_inputs(inputs: &[Vec<Fp>]) -> String {
     serde_json::to_string_pretty(&PublicInputsJson { inputs: rows })
         .expect("PublicInputsJson serialization is infallible")
 }
-fn decode_public_inputs(json: &str) -> CResult<Vec<Vec<Fp>>> {
+fn decode_public_inputs(json: &str) -> CResult<Vec<Vec<Fr>>> {
     let parsed: PublicInputsJson = serde_json::from_str(json)?;
     parsed.inputs.iter().map(|row| row.iter().map(|s| parse_field(s)).collect()).collect()
 }
@@ -142,7 +142,7 @@ fn convert_failure(f: &VerifyFailure) -> FailureEntry {
             column: None,
             details,
         },
-        VerifyFailure::Lookup { lookup_index, location } => FailureEntry {
+        VerifyFailure::Lookup { lookup_index, location, .. } => FailureEntry {
             kind: FailureKind::Lookup,
             gate_name: Some(format!("lookup[{lookup_index}]")),
             region: Some(format!("{location}")),
@@ -156,6 +156,14 @@ fn convert_failure(f: &VerifyFailure) -> FailureEntry {
             region: Some(format!("{location}")),
             row: None,
             column: Some(format!("{column}")),
+            details,
+        },
+        _ => FailureEntry {
+            kind: FailureKind::ConstraintNotSatisfied,
+            gate_name: None,
+            region: None,
+            row: None,
+            column: None,
             details,
         },
     }
@@ -300,7 +308,7 @@ impl CircuitDescriptor for ClaimDescriptor {
         Ok(MockProverReport { circuit_name: NAME.to_string(), k, satisfied, failures })
     }
     fn inspect(&self) -> CResult<CircuitIntrospection> {
-        let mut cs = ConstraintSystem::<Fp>::default();
+        let mut cs = ConstraintSystem::<Fr>::default();
         let _ = ClaimCircuit::configure(&mut cs);
         let debug = format!("{:?}", cs.pinned());
         Ok(CircuitIntrospection {
