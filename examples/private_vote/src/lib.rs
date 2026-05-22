@@ -33,7 +33,7 @@ use halo2_proofs::{
     plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Instance, Selector},
     poly::Rotation,
 };
-use halo2curves::pasta::Fp;
+use halo2curves::bn256::Fr;
 use zerostyl_compiler::gadgets::{
     PoseidonCommitmentChip, PoseidonCommitmentConfig, RangeProofChip, RangeProofConfig,
 };
@@ -56,10 +56,10 @@ pub struct PrivateVoteConfig {
 /// Private vote circuit with Poseidon commitments and range proofs.
 #[derive(Clone, Debug)]
 pub struct PrivateVoteCircuit {
-    pub balance: Value<Fp>,
-    pub randomness_balance: Value<Fp>,
-    pub vote: Value<Fp>,
-    pub randomness_vote: Value<Fp>,
+    pub balance: Value<Fr>,
+    pub randomness_balance: Value<Fr>,
+    pub vote: Value<Fr>,
+    pub randomness_vote: Value<Fr>,
     pub threshold: u64,
 }
 
@@ -78,9 +78,9 @@ impl Default for PrivateVoteCircuit {
 impl PrivateVoteCircuit {
     pub fn new(
         balance: u64,
-        randomness_balance: Fp,
+        randomness_balance: Fr,
         vote: u64,
-        randomness_vote: Fp,
+        randomness_vote: Fr,
         threshold: u64,
     ) -> Self {
         assert!(vote <= 1, "Vote must be 0 or 1");
@@ -92,9 +92,9 @@ impl PrivateVoteCircuit {
         );
 
         Self {
-            balance: Value::known(Fp::from(balance)),
+            balance: Value::known(Fr::from(balance)),
             randomness_balance: Value::known(randomness_balance),
-            vote: Value::known(Fp::from(vote)),
+            vote: Value::known(Fr::from(vote)),
             randomness_vote: Value::known(randomness_vote),
             threshold,
         }
@@ -103,15 +103,15 @@ impl PrivateVoteCircuit {
     /// Constructs a circuit without validating inputs — for use in the debugger only.
     pub fn from_raw(
         balance: u64,
-        randomness_balance: Fp,
+        randomness_balance: Fr,
         vote: u64,
-        randomness_vote: Fp,
+        randomness_vote: Fr,
         threshold: u64,
     ) -> Self {
         Self {
-            balance: Value::known(Fp::from(balance)),
+            balance: Value::known(Fr::from(balance)),
             randomness_balance: Value::known(randomness_balance),
-            vote: Value::known(Fp::from(vote)),
+            vote: Value::known(Fr::from(vote)),
             randomness_vote: Value::known(randomness_vote),
             threshold,
         }
@@ -120,12 +120,12 @@ impl PrivateVoteCircuit {
     /// Uses the P128Pow5T3 specification (128-bit security, width=3, rate=2)
     /// matching halo2_gadgets Poseidon. This provides both hiding and binding
     /// security properties.
-    pub fn compute_commitment(value: Fp, randomness: Fp) -> Fp {
+    pub fn compute_commitment(value: Fr, randomness: Fr) -> Fr {
         PoseidonCommitmentChip::hash_outside_circuit(value, randomness)
     }
 }
 
-impl Circuit<Fp> for PrivateVoteCircuit {
+impl Circuit<Fr> for PrivateVoteCircuit {
     type Config = PrivateVoteConfig;
     type FloorPlanner = SimpleFloorPlanner;
 
@@ -133,7 +133,7 @@ impl Circuit<Fp> for PrivateVoteCircuit {
         Self::default()
     }
 
-    fn configure(meta: &mut ConstraintSystem<Fp>) -> Self::Config {
+    fn configure(meta: &mut ConstraintSystem<Fr>) -> Self::Config {
         let poseidon_config = PoseidonCommitmentChip::configure(meta);
         let range_config = RangeProofChip::configure(meta);
         let instance = meta.instance_column();
@@ -168,7 +168,7 @@ impl Circuit<Fp> for PrivateVoteCircuit {
     fn synthesize(
         &self,
         config: Self::Config,
-        mut layouter: impl Layouter<Fp>,
+        mut layouter: impl Layouter<Fr>,
     ) -> Result<(), Error> {
         let poseidon_chip = PoseidonCommitmentChip::construct(config.poseidon_config.clone());
         let range_chip = RangeProofChip::construct(config.range_config.clone());
@@ -220,7 +220,7 @@ impl Circuit<Fp> for PrivateVoteCircuit {
         //
         // Then diff is range-checked to prove it fits in RANGE_BITS bits,
         // which proves balance >= threshold (for values fitting in RANGE_BITS).
-        let threshold_fp = Fp::from(self.threshold);
+        let threshold_fp = Fr::from(self.threshold);
         let diff_cell = layouter.assign_region(
             || "eligibility check",
             |mut region| {
@@ -285,18 +285,18 @@ mod tests {
         let balance = 100u64;
         let threshold = 50u64;
         let vote = 1u64;
-        let randomness_balance = Fp::from(42);
-        let randomness_vote = Fp::from(84);
+        let randomness_balance = Fr::from(42);
+        let randomness_vote = Fr::from(84);
 
         let circuit =
             PrivateVoteCircuit::new(balance, randomness_balance, vote, randomness_vote, threshold);
 
         let balance_commitment =
-            PrivateVoteCircuit::compute_commitment(Fp::from(balance), randomness_balance);
+            PrivateVoteCircuit::compute_commitment(Fr::from(balance), randomness_balance);
         let vote_commitment =
-            PrivateVoteCircuit::compute_commitment(Fp::from(vote), randomness_vote);
+            PrivateVoteCircuit::compute_commitment(Fr::from(vote), randomness_vote);
 
-        let public_inputs = vec![balance_commitment, Fp::from(threshold), vote_commitment];
+        let public_inputs = vec![balance_commitment, Fr::from(threshold), vote_commitment];
 
         let prover = MockProver::run(k, &circuit, vec![public_inputs]).unwrap();
         assert_eq!(prover.verify(), Ok(()));
@@ -308,18 +308,18 @@ mod tests {
         let balance = 100u64;
         let threshold = 50u64;
         let vote = 0u64;
-        let randomness_balance = Fp::from(42);
-        let randomness_vote = Fp::from(84);
+        let randomness_balance = Fr::from(42);
+        let randomness_vote = Fr::from(84);
 
         let circuit =
             PrivateVoteCircuit::new(balance, randomness_balance, vote, randomness_vote, threshold);
 
         let balance_commitment =
-            PrivateVoteCircuit::compute_commitment(Fp::from(balance), randomness_balance);
+            PrivateVoteCircuit::compute_commitment(Fr::from(balance), randomness_balance);
         let vote_commitment =
-            PrivateVoteCircuit::compute_commitment(Fp::from(vote), randomness_vote);
+            PrivateVoteCircuit::compute_commitment(Fr::from(vote), randomness_vote);
 
-        let public_inputs = vec![balance_commitment, Fp::from(threshold), vote_commitment];
+        let public_inputs = vec![balance_commitment, Fr::from(threshold), vote_commitment];
 
         let prover = MockProver::run(k, &circuit, vec![public_inputs]).unwrap();
         assert_eq!(prover.verify(), Ok(()));
@@ -328,16 +328,16 @@ mod tests {
     #[test]
     #[should_panic(expected = "Vote must be 0 or 1")]
     fn test_private_vote_invalid_vote_value() {
-        let randomness_balance = Fp::from(42);
-        let randomness_vote = Fp::from(84);
+        let randomness_balance = Fr::from(42);
+        let randomness_vote = Fr::from(84);
         PrivateVoteCircuit::new(100, randomness_balance, 2, randomness_vote, 50);
     }
 
     #[test]
     #[should_panic(expected = "Balance below voting threshold")]
     fn test_private_vote_insufficient_balance() {
-        let randomness_balance = Fp::from(42);
-        let randomness_vote = Fp::from(84);
+        let randomness_balance = Fr::from(42);
+        let randomness_vote = Fr::from(84);
         PrivateVoteCircuit::new(30, randomness_balance, 1, randomness_vote, 50);
     }
 
@@ -347,18 +347,18 @@ mod tests {
         let balance = 50u64;
         let threshold = 50u64;
         let vote = 1u64;
-        let randomness_balance = Fp::from(42);
-        let randomness_vote = Fp::from(84);
+        let randomness_balance = Fr::from(42);
+        let randomness_vote = Fr::from(84);
 
         let circuit =
             PrivateVoteCircuit::new(balance, randomness_balance, vote, randomness_vote, threshold);
 
         let balance_commitment =
-            PrivateVoteCircuit::compute_commitment(Fp::from(balance), randomness_balance);
+            PrivateVoteCircuit::compute_commitment(Fr::from(balance), randomness_balance);
         let vote_commitment =
-            PrivateVoteCircuit::compute_commitment(Fp::from(vote), randomness_vote);
+            PrivateVoteCircuit::compute_commitment(Fr::from(vote), randomness_vote);
 
-        let public_inputs = vec![balance_commitment, Fp::from(threshold), vote_commitment];
+        let public_inputs = vec![balance_commitment, Fr::from(threshold), vote_commitment];
 
         let prover = MockProver::run(k, &circuit, vec![public_inputs]).unwrap();
         assert_eq!(prover.verify(), Ok(()));
@@ -366,8 +366,8 @@ mod tests {
 
     #[test]
     fn test_commitment_is_poseidon() {
-        let value = Fp::from(100);
-        let randomness = Fp::from(42);
+        let value = Fr::from(100);
+        let randomness = Fr::from(42);
         let commitment = PrivateVoteCircuit::compute_commitment(value, randomness);
         // Poseidon hash is deterministic but NOT a simple addition
         assert_ne!(commitment, value + randomness);
@@ -393,18 +393,18 @@ mod tests {
         let balance = 100u64;
         let threshold = 0u64;
         let vote = 1u64;
-        let randomness_balance = Fp::from(42);
-        let randomness_vote = Fp::from(84);
+        let randomness_balance = Fr::from(42);
+        let randomness_vote = Fr::from(84);
 
         let circuit =
             PrivateVoteCircuit::new(balance, randomness_balance, vote, randomness_vote, threshold);
 
         let balance_commitment =
-            PrivateVoteCircuit::compute_commitment(Fp::from(balance), randomness_balance);
+            PrivateVoteCircuit::compute_commitment(Fr::from(balance), randomness_balance);
         let vote_commitment =
-            PrivateVoteCircuit::compute_commitment(Fp::from(vote), randomness_vote);
+            PrivateVoteCircuit::compute_commitment(Fr::from(vote), randomness_vote);
 
-        let public_inputs = vec![balance_commitment, Fp::from(threshold), vote_commitment];
+        let public_inputs = vec![balance_commitment, Fr::from(threshold), vote_commitment];
 
         let prover = MockProver::run(k, &circuit, vec![public_inputs]).unwrap();
         assert_eq!(prover.verify(), Ok(()));
@@ -416,18 +416,18 @@ mod tests {
         let balance = 0u64;
         let threshold = 0u64;
         let vote = 0u64;
-        let randomness_balance = Fp::from(42);
-        let randomness_vote = Fp::from(84);
+        let randomness_balance = Fr::from(42);
+        let randomness_vote = Fr::from(84);
 
         let circuit =
             PrivateVoteCircuit::new(balance, randomness_balance, vote, randomness_vote, threshold);
 
         let balance_commitment =
-            PrivateVoteCircuit::compute_commitment(Fp::from(balance), randomness_balance);
+            PrivateVoteCircuit::compute_commitment(Fr::from(balance), randomness_balance);
         let vote_commitment =
-            PrivateVoteCircuit::compute_commitment(Fp::from(vote), randomness_vote);
+            PrivateVoteCircuit::compute_commitment(Fr::from(vote), randomness_vote);
 
-        let public_inputs = vec![balance_commitment, Fp::from(threshold), vote_commitment];
+        let public_inputs = vec![balance_commitment, Fr::from(threshold), vote_commitment];
 
         let prover = MockProver::run(k, &circuit, vec![public_inputs]).unwrap();
         assert_eq!(prover.verify(), Ok(()));
@@ -439,19 +439,19 @@ mod tests {
         let balance = 100u64;
         let threshold = 50u64;
         let vote = 1u64;
-        let randomness_balance = Fp::from(42);
-        let randomness_vote = Fp::from(84);
+        let randomness_balance = Fr::from(42);
+        let randomness_vote = Fr::from(84);
 
         let circuit =
             PrivateVoteCircuit::new(balance, randomness_balance, vote, randomness_vote, threshold);
 
         // Use a wrong balance commitment (different randomness)
         let wrong_commitment =
-            PrivateVoteCircuit::compute_commitment(Fp::from(balance), Fp::from(999));
+            PrivateVoteCircuit::compute_commitment(Fr::from(balance), Fr::from(999));
         let vote_commitment =
-            PrivateVoteCircuit::compute_commitment(Fp::from(vote), randomness_vote);
+            PrivateVoteCircuit::compute_commitment(Fr::from(vote), randomness_vote);
 
-        let public_inputs = vec![wrong_commitment, Fp::from(threshold), vote_commitment];
+        let public_inputs = vec![wrong_commitment, Fr::from(threshold), vote_commitment];
 
         let prover = MockProver::run(k, &circuit, vec![public_inputs]).unwrap();
         assert!(prover.verify().is_err());
@@ -463,24 +463,24 @@ mod tests {
         let balance = 10u64; // Below threshold
         let threshold = 100u64;
         let vote = 1u64;
-        let randomness_balance = Fp::from(42);
-        let randomness_vote = Fp::from(84);
+        let randomness_balance = Fr::from(42);
+        let randomness_vote = Fr::from(84);
 
         let balance_commitment =
-            PrivateVoteCircuit::compute_commitment(Fp::from(balance), randomness_balance);
+            PrivateVoteCircuit::compute_commitment(Fr::from(balance), randomness_balance);
         let vote_commitment =
-            PrivateVoteCircuit::compute_commitment(Fp::from(vote), randomness_vote);
+            PrivateVoteCircuit::compute_commitment(Fr::from(vote), randomness_vote);
 
         // Build circuit directly, bypassing constructor assertions
         let circuit = PrivateVoteCircuit {
-            balance: Value::known(Fp::from(balance)),
+            balance: Value::known(Fr::from(balance)),
             randomness_balance: Value::known(randomness_balance),
-            vote: Value::known(Fp::from(vote)),
+            vote: Value::known(Fr::from(vote)),
             randomness_vote: Value::known(randomness_vote),
             threshold,
         };
 
-        let public_inputs = vec![balance_commitment, Fp::from(threshold), vote_commitment];
+        let public_inputs = vec![balance_commitment, Fr::from(threshold), vote_commitment];
         let prover = MockProver::run(k, &circuit, vec![public_inputs]).unwrap();
         assert!(
             prover.verify().is_err(),
@@ -494,24 +494,24 @@ mod tests {
         let balance = 1000u64;
         let threshold = 100u64;
         let vote = 2u64; // NOT boolean (neither 0 nor 1)
-        let randomness_balance = Fp::from(42);
-        let randomness_vote = Fp::from(84);
+        let randomness_balance = Fr::from(42);
+        let randomness_vote = Fr::from(84);
 
         let balance_commitment =
-            PrivateVoteCircuit::compute_commitment(Fp::from(balance), randomness_balance);
+            PrivateVoteCircuit::compute_commitment(Fr::from(balance), randomness_balance);
         let vote_commitment =
-            PrivateVoteCircuit::compute_commitment(Fp::from(vote), randomness_vote);
+            PrivateVoteCircuit::compute_commitment(Fr::from(vote), randomness_vote);
 
         // Build circuit directly, bypassing constructor assertions
         let circuit = PrivateVoteCircuit {
-            balance: Value::known(Fp::from(balance)),
+            balance: Value::known(Fr::from(balance)),
             randomness_balance: Value::known(randomness_balance),
-            vote: Value::known(Fp::from(vote)),
+            vote: Value::known(Fr::from(vote)),
             randomness_vote: Value::known(randomness_vote),
             threshold,
         };
 
-        let public_inputs = vec![balance_commitment, Fp::from(threshold), vote_commitment];
+        let public_inputs = vec![balance_commitment, Fr::from(threshold), vote_commitment];
         let prover = MockProver::run(k, &circuit, vec![public_inputs]).unwrap();
         assert!(
             prover.verify().is_err(),

@@ -32,7 +32,7 @@ use halo2_proofs::{
     circuit::{Layouter, SimpleFloorPlanner, Value},
     plonk::{Circuit, Column, ConstraintSystem, Error, Instance},
 };
-use halo2curves::pasta::Fp;
+use halo2curves::bn256::Fr;
 use zerostyl_compiler::gadgets::{
     ComparisonChip, ComparisonConfig, PoseidonCommitmentChip, PoseidonCommitmentConfig,
     RangeProofChip, RangeProofConfig,
@@ -60,11 +60,11 @@ pub struct StateMaskConfig {
 /// State mask circuit: proves commitment, range, and comparison properties.
 #[derive(Clone, Debug)]
 pub struct StateMaskCircuit {
-    pub state_value: Value<Fp>,
-    pub nonce: Value<Fp>,
-    pub collateral_ratio: Value<Fp>,
-    pub hidden_balance: Value<Fp>,
-    pub threshold: Value<Fp>,
+    pub state_value: Value<Fr>,
+    pub nonce: Value<Fr>,
+    pub collateral_ratio: Value<Fr>,
+    pub hidden_balance: Value<Fr>,
+    pub threshold: Value<Fr>,
 }
 
 impl Default for StateMaskCircuit {
@@ -88,7 +88,7 @@ impl StateMaskCircuit {
     /// - If `hidden_balance <= threshold`
     pub fn new(
         state_value: u64,
-        nonce: Fp,
+        nonce: Fr,
         collateral_ratio: u64,
         hidden_balance: u64,
         threshold: u64,
@@ -113,11 +113,11 @@ impl StateMaskCircuit {
         );
 
         Self {
-            state_value: Value::known(Fp::from(state_value)),
+            state_value: Value::known(Fr::from(state_value)),
             nonce: Value::known(nonce),
-            collateral_ratio: Value::known(Fp::from(collateral_ratio)),
-            hidden_balance: Value::known(Fp::from(hidden_balance)),
-            threshold: Value::known(Fp::from(threshold)),
+            collateral_ratio: Value::known(Fr::from(collateral_ratio)),
+            hidden_balance: Value::known(Fr::from(hidden_balance)),
+            threshold: Value::known(Fr::from(threshold)),
         }
     }
 
@@ -127,17 +127,17 @@ impl StateMaskCircuit {
     /// the exact failing constraint.
     pub fn from_raw(
         state_value: u64,
-        nonce: Fp,
+        nonce: Fr,
         collateral_ratio: u64,
         hidden_balance: u64,
         threshold: u64,
     ) -> Self {
         Self {
-            state_value: Value::known(Fp::from(state_value)),
+            state_value: Value::known(Fr::from(state_value)),
             nonce: Value::known(nonce),
-            collateral_ratio: Value::known(Fp::from(collateral_ratio)),
-            hidden_balance: Value::known(Fp::from(hidden_balance)),
-            threshold: Value::known(Fp::from(threshold)),
+            collateral_ratio: Value::known(Fr::from(collateral_ratio)),
+            hidden_balance: Value::known(Fr::from(hidden_balance)),
+            threshold: Value::known(Fr::from(threshold)),
         }
     }
 
@@ -145,12 +145,12 @@ impl StateMaskCircuit {
     ///
     /// Used for witness generation and public input computation.
     #[must_use]
-    pub fn compute_commitment(state_value: Fp, nonce: Fp) -> Fp {
+    pub fn compute_commitment(state_value: Fr, nonce: Fr) -> Fr {
         PoseidonCommitmentChip::hash_outside_circuit(state_value, nonce)
     }
 }
 
-impl Circuit<Fp> for StateMaskCircuit {
+impl Circuit<Fr> for StateMaskCircuit {
     type Config = StateMaskConfig;
     type FloorPlanner = SimpleFloorPlanner;
 
@@ -158,7 +158,7 @@ impl Circuit<Fp> for StateMaskCircuit {
         Self::default()
     }
 
-    fn configure(meta: &mut ConstraintSystem<Fp>) -> Self::Config {
+    fn configure(meta: &mut ConstraintSystem<Fr>) -> Self::Config {
         let poseidon_config = PoseidonCommitmentChip::configure(meta);
         let range_config = RangeProofChip::configure(meta);
         let comparison_config = ComparisonChip::configure(meta);
@@ -171,7 +171,7 @@ impl Circuit<Fp> for StateMaskCircuit {
     fn synthesize(
         &self,
         config: Self::Config,
-        mut layouter: impl Layouter<Fp>,
+        mut layouter: impl Layouter<Fr>,
     ) -> Result<(), Error> {
         let poseidon_chip = PoseidonCommitmentChip::construct(config.poseidon_config);
         let range_chip = RangeProofChip::construct(config.range_config);
@@ -199,8 +199,8 @@ impl Circuit<Fp> for StateMaskCircuit {
         range_chip.check_range_bounded(
             layouter.namespace(|| "range check collateral"),
             collateral_cell,
-            Fp::from(COLLATERAL_MIN),
-            Fp::from(COLLATERAL_MAX),
+            Fr::from(COLLATERAL_MIN),
+            Fr::from(COLLATERAL_MAX),
             COLLATERAL_RANGE_BITS,
         )?;
 
@@ -241,12 +241,12 @@ mod tests {
         collateral_ratio: u64,
         hidden_balance: u64,
         threshold: u64,
-    ) -> (StateMaskCircuit, Vec<Vec<Fp>>) {
-        let nonce = Fp::from(nonce_raw);
-        let commitment = StateMaskCircuit::compute_commitment(Fp::from(state_value), nonce);
+    ) -> (StateMaskCircuit, Vec<Vec<Fr>>) {
+        let nonce = Fr::from(nonce_raw);
+        let commitment = StateMaskCircuit::compute_commitment(Fr::from(state_value), nonce);
         let circuit =
             StateMaskCircuit::new(state_value, nonce, collateral_ratio, hidden_balance, threshold);
-        let public_inputs = vec![vec![commitment, Fp::from(threshold)]];
+        let public_inputs = vec![vec![commitment, Fr::from(threshold)]];
         (circuit, public_inputs)
     }
 
@@ -260,7 +260,7 @@ mod tests {
     #[test]
     fn test_wrong_commitment_rejected() {
         let (circuit, _) = make_test_data(1000, 42, 200, 500, 100);
-        let wrong_inputs = vec![vec![Fp::from(999u64), Fp::from(100u64)]];
+        let wrong_inputs = vec![vec![Fr::from(999u64), Fr::from(100u64)]];
         let prover = MockProver::run(TEST_K, &circuit, wrong_inputs).unwrap();
         assert!(prover.verify().is_err());
     }
@@ -268,8 +268,8 @@ mod tests {
     #[test]
     fn test_wrong_threshold_rejected() {
         let (circuit, _) = make_test_data(1000, 42, 200, 500, 100);
-        let commitment = StateMaskCircuit::compute_commitment(Fp::from(1000u64), Fp::from(42u64));
-        let wrong_inputs = vec![vec![commitment, Fp::from(200u64)]];
+        let commitment = StateMaskCircuit::compute_commitment(Fr::from(1000u64), Fr::from(42u64));
+        let wrong_inputs = vec![vec![commitment, Fr::from(200u64)]];
         let prover = MockProver::run(TEST_K, &circuit, wrong_inputs).unwrap();
         assert!(prover.verify().is_err());
     }
@@ -321,8 +321,8 @@ mod tests {
 
     #[test]
     fn test_commitment_deterministic() {
-        let value = Fp::from(42u64);
-        let nonce = Fp::from(123u64);
+        let value = Fr::from(42u64);
+        let nonce = Fr::from(123u64);
         let c1 = StateMaskCircuit::compute_commitment(value, nonce);
         let c2 = StateMaskCircuit::compute_commitment(value, nonce);
         assert_eq!(c1, c2);
@@ -330,9 +330,9 @@ mod tests {
 
     #[test]
     fn test_commitment_different_nonce() {
-        let value = Fp::from(42u64);
-        let c1 = StateMaskCircuit::compute_commitment(value, Fp::from(1u64));
-        let c2 = StateMaskCircuit::compute_commitment(value, Fp::from(2u64));
+        let value = Fr::from(42u64);
+        let c1 = StateMaskCircuit::compute_commitment(value, Fr::from(1u64));
+        let c2 = StateMaskCircuit::compute_commitment(value, Fr::from(2u64));
         assert_ne!(c1, c2);
     }
 
@@ -366,18 +366,18 @@ mod tests {
     #[test]
     fn test_circuit_rejects_collateral_below_min() {
         let state_value = 1000u64;
-        let nonce = Fp::from(42u64);
-        let commitment = StateMaskCircuit::compute_commitment(Fp::from(state_value), nonce);
+        let nonce = Fr::from(42u64);
+        let commitment = StateMaskCircuit::compute_commitment(Fr::from(state_value), nonce);
 
         let circuit = StateMaskCircuit {
-            state_value: Value::known(Fp::from(state_value)),
+            state_value: Value::known(Fr::from(state_value)),
             nonce: Value::known(nonce),
-            collateral_ratio: Value::known(Fp::from(149u64)), // Below COLLATERAL_MIN
-            hidden_balance: Value::known(Fp::from(500u64)),
-            threshold: Value::known(Fp::from(100u64)),
+            collateral_ratio: Value::known(Fr::from(149u64)), // Below COLLATERAL_MIN
+            hidden_balance: Value::known(Fr::from(500u64)),
+            threshold: Value::known(Fr::from(100u64)),
         };
 
-        let public_inputs = vec![vec![commitment, Fp::from(100u64)]];
+        let public_inputs = vec![vec![commitment, Fr::from(100u64)]];
         let prover = MockProver::run(TEST_K, &circuit, public_inputs).unwrap();
         assert!(prover.verify().is_err(), "Circuit must reject collateral_ratio below min");
     }
@@ -385,18 +385,18 @@ mod tests {
     #[test]
     fn test_circuit_rejects_collateral_above_max() {
         let state_value = 1000u64;
-        let nonce = Fp::from(42u64);
-        let commitment = StateMaskCircuit::compute_commitment(Fp::from(state_value), nonce);
+        let nonce = Fr::from(42u64);
+        let commitment = StateMaskCircuit::compute_commitment(Fr::from(state_value), nonce);
 
         let circuit = StateMaskCircuit {
-            state_value: Value::known(Fp::from(state_value)),
+            state_value: Value::known(Fr::from(state_value)),
             nonce: Value::known(nonce),
-            collateral_ratio: Value::known(Fp::from(301u64)), // Above COLLATERAL_MAX
-            hidden_balance: Value::known(Fp::from(500u64)),
-            threshold: Value::known(Fp::from(100u64)),
+            collateral_ratio: Value::known(Fr::from(301u64)), // Above COLLATERAL_MAX
+            hidden_balance: Value::known(Fr::from(500u64)),
+            threshold: Value::known(Fr::from(100u64)),
         };
 
-        let public_inputs = vec![vec![commitment, Fp::from(100u64)]];
+        let public_inputs = vec![vec![commitment, Fr::from(100u64)]];
         let prover = MockProver::run(TEST_K, &circuit, public_inputs).unwrap();
         assert!(prover.verify().is_err(), "Circuit must reject collateral_ratio above max");
     }
@@ -404,18 +404,18 @@ mod tests {
     #[test]
     fn test_circuit_rejects_balance_below_threshold() {
         let state_value = 1000u64;
-        let nonce = Fp::from(42u64);
-        let commitment = StateMaskCircuit::compute_commitment(Fp::from(state_value), nonce);
+        let nonce = Fr::from(42u64);
+        let commitment = StateMaskCircuit::compute_commitment(Fr::from(state_value), nonce);
 
         let circuit = StateMaskCircuit {
-            state_value: Value::known(Fp::from(state_value)),
+            state_value: Value::known(Fr::from(state_value)),
             nonce: Value::known(nonce),
-            collateral_ratio: Value::known(Fp::from(200u64)),
-            hidden_balance: Value::known(Fp::from(500u64)),
-            threshold: Value::known(Fp::from(600u64)), // threshold > balance
+            collateral_ratio: Value::known(Fr::from(200u64)),
+            hidden_balance: Value::known(Fr::from(500u64)),
+            threshold: Value::known(Fr::from(600u64)), // threshold > balance
         };
 
-        let public_inputs = vec![vec![commitment, Fp::from(600u64)]];
+        let public_inputs = vec![vec![commitment, Fr::from(600u64)]];
         let prover = MockProver::run(TEST_K, &circuit, public_inputs).unwrap();
         assert!(prover.verify().is_err(), "Circuit must reject balance below threshold");
     }
@@ -423,18 +423,18 @@ mod tests {
     #[test]
     fn test_circuit_rejects_balance_equal_threshold() {
         let state_value = 1000u64;
-        let nonce = Fp::from(42u64);
-        let commitment = StateMaskCircuit::compute_commitment(Fp::from(state_value), nonce);
+        let nonce = Fr::from(42u64);
+        let commitment = StateMaskCircuit::compute_commitment(Fr::from(state_value), nonce);
 
         let circuit = StateMaskCircuit {
-            state_value: Value::known(Fp::from(state_value)),
+            state_value: Value::known(Fr::from(state_value)),
             nonce: Value::known(nonce),
-            collateral_ratio: Value::known(Fp::from(200u64)),
-            hidden_balance: Value::known(Fp::from(500u64)),
-            threshold: Value::known(Fp::from(500u64)), // threshold == balance
+            collateral_ratio: Value::known(Fr::from(200u64)),
+            hidden_balance: Value::known(Fr::from(500u64)),
+            threshold: Value::known(Fr::from(500u64)), // threshold == balance
         };
 
-        let public_inputs = vec![vec![commitment, Fp::from(500u64)]];
+        let public_inputs = vec![vec![commitment, Fr::from(500u64)]];
         let prover = MockProver::run(TEST_K, &circuit, public_inputs).unwrap();
         assert!(prover.verify().is_err(), "Circuit must reject balance equal to threshold");
     }

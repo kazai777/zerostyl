@@ -45,7 +45,7 @@ pub fn emit_circuit(circuit_name: &str, attrs: &[ResolvedAttr]) -> Result<String
             instance: Column<Instance>,
         }
 
-        impl Circuit<Fp> for #circuit_ident {
+        impl Circuit<Fr> for #circuit_ident {
             type Config = #config_ident;
             type FloorPlanner = SimpleFloorPlanner;
 
@@ -53,14 +53,14 @@ pub fn emit_circuit(circuit_name: &str, attrs: &[ResolvedAttr]) -> Result<String
                 Self::default()
             }
 
-            fn configure(meta: &mut ConstraintSystem<Fp>) -> Self::Config {
+            fn configure(meta: &mut ConstraintSystem<Fr>) -> Self::Config {
                 #configure_body
             }
 
             fn synthesize(
                 &self,
                 config: Self::Config,
-                mut layouter: impl Layouter<Fp>,
+                mut layouter: impl Layouter<Fr>,
             ) -> std::result::Result<(), Error> {
                 #synthesize_body
             }
@@ -146,7 +146,7 @@ fn emit_imports(chips: &ChipUsage) -> TokenStream {
             circuit::{Layouter, SimpleFloorPlanner, Value},
             plonk::{Circuit, Column, ConstraintSystem, Error, Instance},
         };
-        use halo2curves::pasta::Fp;
+        use halo2curves::bn256::Fr;
         use zerostyl_compiler::gadgets::{ #( #gadget_items ),* };
     }
 }
@@ -200,8 +200,8 @@ fn emit_witness_fields(attrs: &[ResolvedAttr]) -> Vec<TokenStream> {
         .map(|(name, kind)| {
             let ident = format_ident!("{}", name);
             match kind {
-                FieldKind::Scalar => quote! { #ident: Value<Fp> },
-                FieldKind::VecScalar => quote! { #ident: Vec<Value<Fp>> },
+                FieldKind::Scalar => quote! { #ident: Value<Fr> },
+                FieldKind::VecScalar => quote! { #ident: Vec<Value<Fr>> },
             }
         })
         .collect()
@@ -450,9 +450,9 @@ fn emit_range(
     let high_expr: syn::Expr = syn::parse_str(high)
         .map_err(|e| ExporterError::Parse(format!("range high '{high}': {e}")))?;
     let high_call = if inclusive {
-        quote! { Fp::from((#high_expr) as u64) }
+        quote! { Fr::from((#high_expr) as u64) }
     } else {
-        quote! { Fp::from(((#high_expr) as u64) - 1) }
+        quote! { Fr::from(((#high_expr) as u64) - 1) }
     };
     Ok(vec![quote! {
         let #cell = range_chip.load_value(
@@ -462,7 +462,7 @@ fn emit_range(
         range_chip.check_range_bounded(
             layouter.namespace(|| #check_label),
             #cell,
-            Fp::from((#low_expr) as u64),
+            Fr::from((#low_expr) as u64),
             #high_call,
             #num_bits,
         )?;
@@ -636,7 +636,7 @@ pub fn emit_descriptor(circuit_name: &str, attrs: &[ResolvedAttr]) -> Result<Str
             dev::{MockProver, VerifyFailure},
             plonk::{Circuit, ConstraintSystem},
         };
-        use halo2curves::pasta::Fp;
+        use halo2curves::bn256::Fr;
         use serde::{Deserialize, Serialize};
         use zerostyl_circuits::{
             CircuitDescriptor, CircuitError, CircuitIntrospection, FailureEntry, FailureKind,
@@ -669,7 +669,7 @@ pub fn emit_descriptor(circuit_name: &str, attrs: &[ResolvedAttr]) -> Result<Str
 
         struct ParsedInputs {
             circuit: #circuit_ident,
-            public_inputs: Vec<Vec<Fp>>,
+            public_inputs: Vec<Vec<Fr>>,
         }
 
         fn parse_u64(s: &str, field: &str) -> CResult<u64> {
@@ -678,7 +678,7 @@ pub fn emit_descriptor(circuit_name: &str, attrs: &[ResolvedAttr]) -> Result<Str
             })
         }
 
-        fn parse_field(s: &str) -> CResult<Fp> {
+        fn parse_field(s: &str) -> CResult<Fr> {
             use halo2curves::group::ff::PrimeField;
             if let Some(hex_str) = s.strip_prefix("0x") {
                 let bytes = hex::decode(hex_str)
@@ -686,11 +686,11 @@ pub fn emit_descriptor(circuit_name: &str, attrs: &[ResolvedAttr]) -> Result<Str
                 let mut repr = [0u8; 32];
                 let len = bytes.len().min(32);
                 repr[..len].copy_from_slice(&bytes[..len]);
-                Option::from(Fp::from_repr(repr)).ok_or_else(|| {
+                Option::from(Fr::from_repr(repr)).ok_or_else(|| {
                     CircuitError::InvalidWitness(format!("invalid field element '{s}'"))
                 })
             } else {
-                Ok(Fp::from(parse_u64(s, "field")?))
+                Ok(Fr::from(parse_u64(s, "field")?))
             }
         }
 
@@ -703,7 +703,7 @@ pub fn emit_descriptor(circuit_name: &str, attrs: &[ResolvedAttr]) -> Result<Str
             #build_inputs_body
         }
 
-        fn encode_public_inputs(inputs: &[Vec<Fp>]) -> String {
+        fn encode_public_inputs(inputs: &[Vec<Fr>]) -> String {
             use halo2curves::group::ff::PrimeField;
             let rows: Vec<Vec<String>> = inputs
                 .iter()
@@ -715,7 +715,7 @@ pub fn emit_descriptor(circuit_name: &str, attrs: &[ResolvedAttr]) -> Result<Str
                 .expect("PublicInputsJson serialization is infallible")
         }
 
-        fn decode_public_inputs(json: &str) -> CResult<Vec<Vec<Fp>>> {
+        fn decode_public_inputs(json: &str) -> CResult<Vec<Vec<Fr>>> {
             let parsed: PublicInputsJson = serde_json::from_str(json)?;
             parsed
                 .inputs
@@ -763,7 +763,7 @@ pub fn emit_descriptor(circuit_name: &str, attrs: &[ResolvedAttr]) -> Result<Str
                     column: None,
                     details,
                 },
-                VerifyFailure::Lookup { lookup_index, location } => FailureEntry {
+                VerifyFailure::Lookup { lookup_index, location, .. } => FailureEntry {
                     kind: FailureKind::Lookup,
                     gate_name: Some(format!("lookup[{lookup_index}]")),
                     region: Some(format!("{location}")),
@@ -777,6 +777,14 @@ pub fn emit_descriptor(circuit_name: &str, attrs: &[ResolvedAttr]) -> Result<Str
                     region: Some(format!("{location}")),
                     row: None,
                     column: Some(format!("{column}")),
+                    details,
+                },
+                _ => FailureEntry {
+                    kind: FailureKind::ConstraintNotSatisfied,
+                    gate_name: None,
+                    region: None,
+                    row: None,
+                    column: None,
                     details,
                 },
             }
@@ -893,7 +901,7 @@ pub fn emit_descriptor(circuit_name: &str, attrs: &[ResolvedAttr]) -> Result<Str
             }
 
             fn inspect(&self) -> CResult<CircuitIntrospection> {
-                let mut cs = ConstraintSystem::<Fp>::default();
+                let mut cs = ConstraintSystem::<Fr>::default();
                 let _ = #circuit_ident::configure(&mut cs);
                 let debug = format!("{:?}", cs.pinned());
                 Ok(CircuitIntrospection {
@@ -1052,7 +1060,7 @@ fn emit_build_inputs_body(attrs: &[ResolvedAttr], circuit_ident: &syn::Ident) ->
         if seen.insert(name.to_string()) {
             let ident = format_ident!("{}", name);
             vec_parses.push(quote! {
-                let #ident: Vec<Fp> = w.#ident.iter()
+                let #ident: Vec<Fr> = w.#ident.iter()
                     .map(|s| parse_field(s))
                     .collect::<CResult<_>>()?;
             });
@@ -1395,8 +1403,8 @@ mod tests {
             vec![AttrSpec::Constraint(Constraint::Gte("threshold".into()))],
         )];
         let src = emit_circuit("foo", &attrs).unwrap();
-        assert!(src.contains("x : Value < Fp >") || src.contains("x: Value<Fp>"));
-        assert!(src.contains("threshold : Value < Fp >") || src.contains("threshold: Value<Fp>"));
+        assert!(src.contains("x : Value < Fr >") || src.contains("x: Value<Fr>"));
+        assert!(src.contains("threshold : Value < Fr >") || src.contains("threshold: Value<Fr>"));
     }
 
     #[test]
@@ -1672,7 +1680,7 @@ mod tests {
         assert!(src.contains("NativeProver"), "prove/verify should delegate to NativeProver");
         assert!(src.contains("MockProver :: run") || src.contains("MockProver::run"));
         assert!(
-            src.contains("ConstraintSystem :: < Fp >") || src.contains("ConstraintSystem::<Fp>")
+            src.contains("ConstraintSystem :: < Fr >") || src.contains("ConstraintSystem::<Fr>")
         );
         assert!(src.contains("hash_outside_circuit"));
         assert!(src.contains("WitnessJson"));

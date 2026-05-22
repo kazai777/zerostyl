@@ -13,7 +13,7 @@ use halo2_proofs::{
     plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Instance, Selector},
     poly::Rotation,
 };
-use halo2curves::pasta::Fp;
+use halo2curves::bn256::Fr;
 
 #[derive(Clone, Debug)]
 pub struct ExampleConfig {
@@ -24,8 +24,8 @@ pub struct ExampleConfig {
 
 #[derive(Clone, Debug)]
 pub struct ExampleCircuit {
-    pub a: Value<Fp>,
-    pub b: Value<Fp>,
+    pub a: Value<Fr>,
+    pub b: Value<Fr>,
 }
 
 impl Default for ExampleCircuit {
@@ -35,16 +35,16 @@ impl Default for ExampleCircuit {
 }
 
 impl ExampleCircuit {
-    pub fn new(a: Fp, b: Fp) -> Self {
+    pub fn new(a: Fr, b: Fr) -> Self {
         Self { a: Value::known(a), b: Value::known(b) }
     }
 
-    pub fn compute_sum(a: Fp, b: Fp) -> Fp {
+    pub fn compute_sum(a: Fr, b: Fr) -> Fr {
         a + b
     }
 }
 
-impl Circuit<Fp> for ExampleCircuit {
+impl Circuit<Fr> for ExampleCircuit {
     type Config = ExampleConfig;
     type FloorPlanner = SimpleFloorPlanner;
 
@@ -52,7 +52,7 @@ impl Circuit<Fp> for ExampleCircuit {
         Self::default()
     }
 
-    fn configure(meta: &mut ConstraintSystem<Fp>) -> Self::Config {
+    fn configure(meta: &mut ConstraintSystem<Fr>) -> Self::Config {
         let advice = meta.advice_column();
         let instance = meta.instance_column();
         let selector = meta.selector();
@@ -74,7 +74,7 @@ impl Circuit<Fp> for ExampleCircuit {
     fn synthesize(
         &self,
         config: Self::Config,
-        mut layouter: impl Layouter<Fp>,
+        mut layouter: impl Layouter<Fr>,
     ) -> Result<(), Error> {
         layouter.assign_region(
             || "add",
@@ -95,23 +95,23 @@ mod tests {
 
     #[test]
     fn add_circuit_is_satisfied() {
-        let circuit = ExampleCircuit::new(Fp::from(2), Fp::from(3));
-        let public_inputs = vec![vec![Fp::from(5)]];
+        let circuit = ExampleCircuit::new(Fr::from(2), Fr::from(3));
+        let public_inputs = vec![vec![Fr::from(5)]];
         let prover = MockProver::run(4, &circuit, public_inputs).unwrap();
         assert!(prover.verify().is_ok());
     }
 
     #[test]
     fn wrong_sum_is_rejected() {
-        let circuit = ExampleCircuit::new(Fp::from(2), Fp::from(3));
-        let wrong_inputs = vec![vec![Fp::from(99)]];
+        let circuit = ExampleCircuit::new(Fr::from(2), Fr::from(3));
+        let wrong_inputs = vec![vec![Fr::from(99)]];
         let prover = MockProver::run(4, &circuit, wrong_inputs).unwrap();
         assert!(prover.verify().is_err());
     }
 
     #[test]
     fn compute_sum_helper() {
-        assert_eq!(ExampleCircuit::compute_sum(Fp::from(7), Fp::from(8)), Fp::from(15));
+        assert_eq!(ExampleCircuit::compute_sum(Fr::from(7), Fr::from(8)), Fr::from(15));
     }
 
     #[test]

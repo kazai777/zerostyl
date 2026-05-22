@@ -22,7 +22,7 @@ use std::hint::black_box;
 
 use halo2_proofs::arithmetic::Field;
 use halo2_proofs::dev::MockProver;
-use halo2curves::pasta::Fp;
+use halo2curves::bn256::Fr;
 use private_vote::PrivateVoteCircuit;
 use state_mask::StateMaskCircuit;
 use tx_privacy::{TxPrivacyCircuit, MERKLE_DEPTH};
@@ -214,11 +214,11 @@ fn pct_change(before: usize, after: usize) -> String {
 /// A: state_mask — wrong commitment (value=42, randomness=123, injected=999)
 fn scenario_a() -> (ScenarioResult, String, String) {
     let value = 42u64;
-    let randomness = Fp::from(123u64);
-    let wrong_commitment = Fp::from(999u64);
+    let randomness = Fr::from(123u64);
+    let wrong_commitment = Fr::from(999u64);
     let threshold = 100u64;
     let k = 10u32;
-    let pi = vec![vec![wrong_commitment, Fp::from(threshold)]];
+    let pi = vec![vec![wrong_commitment, Fr::from(threshold)]];
 
     let circuit_raw = black_box(StateMaskCircuit::from_raw(value, randomness, 200, 500, threshold));
     let prover = MockProver::run(k, &circuit_raw, pi.clone()).expect("MockProver::run failed");
@@ -251,15 +251,15 @@ fn scenario_a() -> (ScenarioResult, String, String) {
 fn scenario_b() -> (ScenarioResult, String, String) {
     let balance_old = 1000u64;
     let balance_new = 800u64;
-    let r_old = Fp::from(7u64);
-    let r_new = Fp::from(13u64);
+    let r_old = Fr::from(7u64);
+    let r_new = Fr::from(13u64);
     let amount = 300u64; // correct: balance_old - balance_new = 200
-    let path = vec![Fp::ZERO; MERKLE_DEPTH];
+    let path = vec![Fr::ZERO; MERKLE_DEPTH];
     let k = 14u32;
 
     let indices = vec![false; MERKLE_DEPTH];
-    let comm_old = TxPrivacyCircuit::compute_commitment(Fp::from(balance_old), r_old);
-    let comm_new = TxPrivacyCircuit::compute_commitment(Fp::from(balance_new), r_new);
+    let comm_old = TxPrivacyCircuit::compute_commitment(Fr::from(balance_old), r_old);
+    let comm_new = TxPrivacyCircuit::compute_commitment(Fr::from(balance_new), r_new);
     let root = TxPrivacyCircuit::compute_merkle_root(comm_old, &path, &indices);
     let pi = vec![vec![comm_old, comm_new, root]];
 
@@ -305,15 +305,15 @@ fn scenario_b() -> (ScenarioResult, String, String) {
 /// C: private_vote — illegal vote value (vote=2, must be 0 or 1)
 fn scenario_c() -> (ScenarioResult, String, String) {
     let balance = 100u64;
-    let r_bal = Fp::from(42u64);
+    let r_bal = Fr::from(42u64);
     let vote = 2u64; // must be 0 or 1
-    let r_vote = Fp::from(84u64);
+    let r_vote = Fr::from(84u64);
     let threshold = 50u64;
     let k = 11u32;
 
-    let bal_commit = PrivateVoteCircuit::compute_commitment(Fp::from(balance), r_bal);
-    let vote_commit = PrivateVoteCircuit::compute_commitment(Fp::from(vote), r_vote);
-    let pi = vec![vec![bal_commit, Fp::from(threshold), vote_commit]];
+    let bal_commit = PrivateVoteCircuit::compute_commitment(Fr::from(balance), r_bal);
+    let vote_commit = PrivateVoteCircuit::compute_commitment(Fr::from(vote), r_vote);
+    let pi = vec![vec![bal_commit, Fr::from(threshold), vote_commit]];
 
     let circuit_raw =
         black_box(PrivateVoteCircuit::from_raw(balance, r_bal, vote, r_vote, threshold));

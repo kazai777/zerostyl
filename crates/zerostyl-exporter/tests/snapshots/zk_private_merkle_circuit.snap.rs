@@ -3,18 +3,18 @@ use halo2_proofs::{
     circuit::{Layouter, SimpleFloorPlanner, Value},
     plonk::{Circuit, Column, ConstraintSystem, Error, Instance},
 };
-use halo2curves::pasta::Fp;
+use halo2curves::bn256::Fr;
 use zerostyl_compiler::gadgets::{
     MerkleTreeChip, MerkleTreeConfig, PoseidonCommitmentChip, PoseidonCommitmentConfig,
 };
 pub const MERKLE_DEPTH: usize = 32;
 #[derive(Clone, Debug)]
 pub struct ClaimCircuit {
-    pub leaf: Value<Fp>,
-    pub leaf_nonce: Value<Fp>,
-    pub root: Value<Fp>,
-    pub siblings: Vec<Value<Fp>>,
-    pub indices: Vec<Value<Fp>>,
+    pub leaf: Value<Fr>,
+    pub leaf_nonce: Value<Fr>,
+    pub root: Value<Fr>,
+    pub siblings: Vec<Value<Fr>>,
+    pub indices: Vec<Value<Fr>>,
 }
 impl Default for ClaimCircuit {
     fn default() -> Self {
@@ -33,13 +33,13 @@ pub struct ClaimCircuitConfig {
     merkle_config: MerkleTreeConfig,
     instance: Column<Instance>,
 }
-impl Circuit<Fp> for ClaimCircuit {
+impl Circuit<Fr> for ClaimCircuit {
     type Config = ClaimCircuitConfig;
     type FloorPlanner = SimpleFloorPlanner;
     fn without_witnesses(&self) -> Self {
         Self::default()
     }
-    fn configure(meta: &mut ConstraintSystem<Fp>) -> Self::Config {
+    fn configure(meta: &mut ConstraintSystem<Fr>) -> Self::Config {
         let poseidon_config = PoseidonCommitmentChip::configure(meta);
         let merkle_config = MerkleTreeChip::configure(meta);
         let instance = meta.instance_column();
@@ -49,7 +49,7 @@ impl Circuit<Fp> for ClaimCircuit {
     fn synthesize(
         &self,
         config: Self::Config,
-        mut layouter: impl Layouter<Fp>,
+        mut layouter: impl Layouter<Fr>,
     ) -> std::result::Result<(), Error> {
         let poseidon_chip = PoseidonCommitmentChip::construct(config.poseidon_config);
         let merkle_chip = MerkleTreeChip::construct(config.merkle_config.clone());

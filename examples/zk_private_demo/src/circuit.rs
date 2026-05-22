@@ -6,16 +6,16 @@ use halo2_proofs::{
     circuit::{Layouter, SimpleFloorPlanner, Value},
     plonk::{Circuit, Column, ConstraintSystem, Error, Instance},
 };
-use halo2curves::pasta::Fp;
+use halo2curves::bn256::Fr;
 use zerostyl_compiler::gadgets::{
     ComparisonChip, ComparisonConfig, PoseidonCommitmentChip, PoseidonCommitmentConfig,
     RangeProofChip, RangeProofConfig,
 };
 #[derive(Clone, Debug, Default)]
 pub struct DepositCircuit {
-    pub collateral: Value<Fp>,
-    pub collateral_nonce: Value<Fp>,
-    pub threshold: Value<Fp>,
+    pub collateral: Value<Fr>,
+    pub collateral_nonce: Value<Fr>,
+    pub threshold: Value<Fr>,
 }
 #[derive(Debug, Clone)]
 pub struct DepositCircuitConfig {
@@ -24,13 +24,13 @@ pub struct DepositCircuitConfig {
     comparison_config: ComparisonConfig,
     instance: Column<Instance>,
 }
-impl Circuit<Fp> for DepositCircuit {
+impl Circuit<Fr> for DepositCircuit {
     type Config = DepositCircuitConfig;
     type FloorPlanner = SimpleFloorPlanner;
     fn without_witnesses(&self) -> Self {
         Self::default()
     }
-    fn configure(meta: &mut ConstraintSystem<Fp>) -> Self::Config {
+    fn configure(meta: &mut ConstraintSystem<Fr>) -> Self::Config {
         let poseidon_config = PoseidonCommitmentChip::configure(meta);
         let range_config = RangeProofChip::configure(meta);
         let comparison_config = ComparisonChip::configure(meta);
@@ -41,7 +41,7 @@ impl Circuit<Fp> for DepositCircuit {
     fn synthesize(
         &self,
         config: Self::Config,
-        mut layouter: impl Layouter<Fp>,
+        mut layouter: impl Layouter<Fr>,
     ) -> std::result::Result<(), Error> {
         let poseidon_chip = PoseidonCommitmentChip::construct(config.poseidon_config);
         let range_chip = RangeProofChip::construct(config.range_config);
@@ -68,8 +68,8 @@ impl Circuit<Fp> for DepositCircuit {
         range_chip.check_range_bounded(
             layouter.namespace(|| "range check collateral"),
             collateral_range_value,
-            Fp::from((0) as u64),
-            Fp::from(((1000000) as u64) - 1),
+            Fr::from((0) as u64),
+            Fr::from(((1000000) as u64) - 1),
             64usize,
         )?;
         let collateral_cmp_value = comparison_chip

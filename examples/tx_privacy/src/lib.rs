@@ -35,7 +35,7 @@ use halo2_proofs::{
     plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Instance, Selector},
     poly::Rotation,
 };
-use halo2curves::pasta::Fp;
+use halo2curves::bn256::Fr;
 use zerostyl_compiler::gadgets::{
     MerkleTreeChip, MerkleTreeConfig, PoseidonCommitmentChip, RangeProofChip, RangeProofConfig,
 };
@@ -60,13 +60,13 @@ pub struct TxPrivacyConfig {
 /// all commitments use proper Poseidon hashes.
 #[derive(Clone, Debug)]
 pub struct TxPrivacyCircuit {
-    pub balance_old: Value<Fp>,
-    pub balance_new: Value<Fp>,
-    pub randomness_old: Value<Fp>,
-    pub randomness_new: Value<Fp>,
-    pub amount: Value<Fp>,
-    pub merkle_siblings: Vec<Value<Fp>>,
-    pub merkle_indices: Vec<Value<Fp>>,
+    pub balance_old: Value<Fr>,
+    pub balance_new: Value<Fr>,
+    pub randomness_old: Value<Fr>,
+    pub randomness_new: Value<Fr>,
+    pub amount: Value<Fr>,
+    pub merkle_siblings: Vec<Value<Fr>>,
+    pub merkle_indices: Vec<Value<Fr>>,
 }
 
 impl Default for TxPrivacyCircuit {
@@ -96,10 +96,10 @@ impl TxPrivacyCircuit {
     pub fn new(
         balance_old: u64,
         balance_new: u64,
-        randomness_old: Fp,
-        randomness_new: Fp,
+        randomness_old: Fr,
+        randomness_new: Fr,
         amount: u64,
-        merkle_siblings: Vec<Fp>,
+        merkle_siblings: Vec<Fr>,
         merkle_indices: Vec<bool>,
     ) -> Self {
         assert_eq!(
@@ -118,15 +118,15 @@ impl TxPrivacyCircuit {
         assert_eq!(balance_old - balance_new, amount, "Amount must equal balance difference");
 
         Self {
-            balance_old: Value::known(Fp::from(balance_old)),
-            balance_new: Value::known(Fp::from(balance_new)),
+            balance_old: Value::known(Fr::from(balance_old)),
+            balance_new: Value::known(Fr::from(balance_new)),
             randomness_old: Value::known(randomness_old),
             randomness_new: Value::known(randomness_new),
-            amount: Value::known(Fp::from(amount)),
+            amount: Value::known(Fr::from(amount)),
             merkle_siblings: merkle_siblings.into_iter().map(Value::known).collect(),
             merkle_indices: merkle_indices
                 .iter()
-                .map(|&b| Value::known(if b { Fp::from(1u64) } else { Fp::from(0u64) }))
+                .map(|&b| Value::known(if b { Fr::from(1u64) } else { Fr::from(0u64) }))
                 .collect(),
         }
     }
@@ -135,40 +135,40 @@ impl TxPrivacyCircuit {
     pub fn from_raw(
         balance_old: u64,
         balance_new: u64,
-        randomness_old: Fp,
-        randomness_new: Fp,
+        randomness_old: Fr,
+        randomness_new: Fr,
         amount: u64,
-        merkle_siblings: Vec<Fp>,
+        merkle_siblings: Vec<Fr>,
         merkle_indices: Vec<bool>,
     ) -> Self {
         Self {
-            balance_old: Value::known(Fp::from(balance_old)),
-            balance_new: Value::known(Fp::from(balance_new)),
+            balance_old: Value::known(Fr::from(balance_old)),
+            balance_new: Value::known(Fr::from(balance_new)),
             randomness_old: Value::known(randomness_old),
             randomness_new: Value::known(randomness_new),
-            amount: Value::known(Fp::from(amount)),
+            amount: Value::known(Fr::from(amount)),
             merkle_siblings: merkle_siblings.iter().map(|&s| Value::known(s)).collect(),
             merkle_indices: merkle_indices
                 .iter()
-                .map(|&i| Value::known(Fp::from(i as u64)))
+                .map(|&i| Value::known(Fr::from(i as u64)))
                 .collect(),
         }
     }
 
     /// Computes a Poseidon commitment: `Poseidon(balance, randomness)`.
     #[must_use]
-    pub fn compute_commitment(balance: Fp, randomness: Fp) -> Fp {
+    pub fn compute_commitment(balance: Fr, randomness: Fr) -> Fr {
         PoseidonCommitmentChip::hash_outside_circuit(balance, randomness)
     }
 
     /// Computes the Merkle root outside the circuit (for witness generation).
     #[must_use]
-    pub fn compute_merkle_root(leaf: Fp, siblings: &[Fp], indices: &[bool]) -> Fp {
+    pub fn compute_merkle_root(leaf: Fr, siblings: &[Fr], indices: &[bool]) -> Fr {
         MerkleTreeChip::compute_root_outside_circuit(leaf, siblings, indices)
     }
 }
 
-impl Circuit<Fp> for TxPrivacyCircuit {
+impl Circuit<Fr> for TxPrivacyCircuit {
     type Config = TxPrivacyConfig;
     type FloorPlanner = SimpleFloorPlanner;
 
@@ -184,7 +184,7 @@ impl Circuit<Fp> for TxPrivacyCircuit {
         }
     }
 
-    fn configure(meta: &mut ConstraintSystem<Fp>) -> TxPrivacyConfig {
+    fn configure(meta: &mut ConstraintSystem<Fr>) -> TxPrivacyConfig {
         let merkle_config = MerkleTreeChip::configure(meta);
         let range_config = RangeProofChip::configure(meta);
 
@@ -212,7 +212,7 @@ impl Circuit<Fp> for TxPrivacyCircuit {
     fn synthesize(
         &self,
         config: TxPrivacyConfig,
-        mut layouter: impl Layouter<Fp>,
+        mut layouter: impl Layouter<Fr>,
     ) -> Result<(), Error> {
         let poseidon_chip =
             PoseidonCommitmentChip::construct(config.merkle_config.poseidon_config().clone());
@@ -283,7 +283,7 @@ impl Circuit<Fp> for TxPrivacyCircuit {
         range_chip.check_range(layouter.namespace(|| "range check amount"), amount_cell, 64)?;
 
         // 5. Load Merkle siblings and indices
-        let sibling_cells: Vec<AssignedCell<Fp, Fp>> = self
+        let sibling_cells: Vec<AssignedCell<Fr, Fr>> = self
             .merkle_siblings
             .iter()
             .enumerate()
@@ -292,7 +292,7 @@ impl Circuit<Fp> for TxPrivacyCircuit {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        let index_cells: Vec<AssignedCell<Fp, Fp>> = self
+        let index_cells: Vec<AssignedCell<Fr, Fr>> = self
             .merkle_indices
             .iter()
             .enumerate()
@@ -334,29 +334,29 @@ mod tests {
         balance_new: u64,
         amount: u64,
         depth: usize,
-    ) -> (TxPrivacyCircuit, Vec<Fp>) {
-        let randomness_old = Fp::from(42u64);
-        let randomness_new = Fp::from(84u64);
-        let siblings: Vec<Fp> = (0..depth).map(|i| Fp::from((i + 100) as u64)).collect();
+    ) -> (TxPrivacyCircuit, Vec<Fr>) {
+        let randomness_old = Fr::from(42u64);
+        let randomness_new = Fr::from(84u64);
+        let siblings: Vec<Fr> = (0..depth).map(|i| Fr::from((i + 100) as u64)).collect();
         let indices: Vec<bool> = (0..depth).map(|i| i % 2 == 0).collect();
 
         let commitment_old =
-            TxPrivacyCircuit::compute_commitment(Fp::from(balance_old), randomness_old);
+            TxPrivacyCircuit::compute_commitment(Fr::from(balance_old), randomness_old);
         let commitment_new =
-            TxPrivacyCircuit::compute_commitment(Fp::from(balance_new), randomness_new);
+            TxPrivacyCircuit::compute_commitment(Fr::from(balance_new), randomness_new);
         let merkle_root =
             TxPrivacyCircuit::compute_merkle_root(commitment_old, &siblings, &indices);
 
         let circuit = TxPrivacyCircuit {
-            balance_old: Value::known(Fp::from(balance_old)),
-            balance_new: Value::known(Fp::from(balance_new)),
+            balance_old: Value::known(Fr::from(balance_old)),
+            balance_new: Value::known(Fr::from(balance_new)),
             randomness_old: Value::known(randomness_old),
             randomness_new: Value::known(randomness_new),
-            amount: Value::known(Fp::from(amount)),
+            amount: Value::known(Fr::from(amount)),
             merkle_siblings: siblings.iter().map(|s| Value::known(*s)).collect(),
             merkle_indices: indices
                 .iter()
-                .map(|&b| Value::known(if b { Fp::from(1u64) } else { Fp::from(0u64) }))
+                .map(|&b| Value::known(if b { Fr::from(1u64) } else { Fr::from(0u64) }))
                 .collect(),
         };
 
@@ -373,7 +373,7 @@ mod tests {
     #[test]
     fn test_tx_privacy_wrong_commitment_rejected() {
         let (circuit, mut public_inputs) = make_test_data(1000, 700, 300, TEST_DEPTH);
-        public_inputs[0] = Fp::from(999u64);
+        public_inputs[0] = Fr::from(999u64);
         let prover = MockProver::run(TEST_K, &circuit, vec![public_inputs]).unwrap();
         assert!(prover.verify().is_err());
     }
@@ -381,35 +381,35 @@ mod tests {
     #[test]
     fn test_tx_privacy_wrong_merkle_root_rejected() {
         let (circuit, mut public_inputs) = make_test_data(1000, 700, 300, TEST_DEPTH);
-        public_inputs[2] = Fp::from(999u64);
+        public_inputs[2] = Fr::from(999u64);
         let prover = MockProver::run(TEST_K, &circuit, vec![public_inputs]).unwrap();
         assert!(prover.verify().is_err());
     }
 
     #[test]
     fn test_tx_privacy_wrong_balance_rejected() {
-        let randomness_old = Fp::from(42u64);
-        let randomness_new = Fp::from(84u64);
-        let siblings: Vec<Fp> = (0..TEST_DEPTH).map(|i| Fp::from((i + 100) as u64)).collect();
+        let randomness_old = Fr::from(42u64);
+        let randomness_new = Fr::from(84u64);
+        let siblings: Vec<Fr> = (0..TEST_DEPTH).map(|i| Fr::from((i + 100) as u64)).collect();
         let indices: Vec<bool> = (0..TEST_DEPTH).map(|i| i % 2 == 0).collect();
 
         // balance_old(1000) - amount(300) = 700 ≠ balance_new(600)
         let commitment_old =
-            TxPrivacyCircuit::compute_commitment(Fp::from(1000u64), randomness_old);
-        let commitment_new = TxPrivacyCircuit::compute_commitment(Fp::from(600u64), randomness_new);
+            TxPrivacyCircuit::compute_commitment(Fr::from(1000u64), randomness_old);
+        let commitment_new = TxPrivacyCircuit::compute_commitment(Fr::from(600u64), randomness_new);
         let merkle_root =
             TxPrivacyCircuit::compute_merkle_root(commitment_old, &siblings, &indices);
 
         let circuit = TxPrivacyCircuit {
-            balance_old: Value::known(Fp::from(1000u64)),
-            balance_new: Value::known(Fp::from(600u64)),
+            balance_old: Value::known(Fr::from(1000u64)),
+            balance_new: Value::known(Fr::from(600u64)),
             randomness_old: Value::known(randomness_old),
             randomness_new: Value::known(randomness_new),
-            amount: Value::known(Fp::from(300u64)),
+            amount: Value::known(Fr::from(300u64)),
             merkle_siblings: siblings.iter().map(|s| Value::known(*s)).collect(),
             merkle_indices: indices
                 .iter()
-                .map(|&b| Value::known(if b { Fp::from(1u64) } else { Fp::from(0u64) }))
+                .map(|&b| Value::known(if b { Fr::from(1u64) } else { Fr::from(0u64) }))
                 .collect(),
         };
 
@@ -424,10 +424,10 @@ mod tests {
         let _ = TxPrivacyCircuit::new(
             700,
             1000,
-            Fp::from(42u64),
-            Fp::from(84u64),
+            Fr::from(42u64),
+            Fr::from(84u64),
             300,
-            vec![Fp::from(0u64); MERKLE_DEPTH],
+            vec![Fr::from(0u64); MERKLE_DEPTH],
             vec![false; MERKLE_DEPTH],
         );
     }
@@ -438,10 +438,10 @@ mod tests {
         let _ = TxPrivacyCircuit::new(
             1000,
             700,
-            Fp::from(42u64),
-            Fp::from(84u64),
+            Fr::from(42u64),
+            Fr::from(84u64),
             100,
-            vec![Fp::from(0u64); MERKLE_DEPTH],
+            vec![Fr::from(0u64); MERKLE_DEPTH],
             vec![false; MERKLE_DEPTH],
         );
     }
@@ -462,19 +462,19 @@ mod tests {
 
     #[test]
     fn test_commitment_computation() {
-        let balance = Fp::from(1000u64);
-        let randomness = Fp::from(42u64);
+        let balance = Fr::from(1000u64);
+        let randomness = Fr::from(42u64);
         let commitment = TxPrivacyCircuit::compute_commitment(balance, randomness);
         // Poseidon hash is NOT simple addition
-        assert_ne!(commitment, Fp::from(1042u64));
+        assert_ne!(commitment, Fr::from(1042u64));
         // Deterministic
         assert_eq!(commitment, TxPrivacyCircuit::compute_commitment(balance, randomness));
     }
 
     #[test]
     fn test_compute_merkle_root() {
-        let leaf = Fp::from(100u64);
-        let siblings = vec![Fp::from(1u64), Fp::from(2u64)];
+        let leaf = Fr::from(100u64);
+        let siblings = vec![Fr::from(1u64), Fr::from(2u64)];
         let indices = vec![false, true];
         let root = TxPrivacyCircuit::compute_merkle_root(leaf, &siblings, &indices);
         // Deterministic
@@ -499,10 +499,10 @@ mod tests {
         let _ = TxPrivacyCircuit::new(
             1000,
             700,
-            Fp::from(42u64),
-            Fp::from(84u64),
+            Fr::from(42u64),
+            Fr::from(84u64),
             300,
-            vec![Fp::from(0u64); 10],
+            vec![Fr::from(0u64); 10],
             vec![false; 10],
         );
     }
@@ -512,31 +512,31 @@ mod tests {
         let balance_old = 1000u64;
         let balance_new = 700u64;
         let amount = 300u64;
-        let randomness_old = Fp::from(42u64);
-        let wrong_randomness_old = Fp::from(999u64); // Different from what circuit uses
-        let randomness_new = Fp::from(84u64);
-        let siblings: Vec<Fp> = (0..TEST_DEPTH).map(|i| Fp::from((i + 100) as u64)).collect();
+        let randomness_old = Fr::from(42u64);
+        let wrong_randomness_old = Fr::from(999u64); // Different from what circuit uses
+        let randomness_new = Fr::from(84u64);
+        let siblings: Vec<Fr> = (0..TEST_DEPTH).map(|i| Fr::from((i + 100) as u64)).collect();
         let indices: Vec<bool> = (0..TEST_DEPTH).map(|i| i % 2 == 0).collect();
 
         // Compute public inputs with the WRONG randomness
         let wrong_commitment_old =
-            TxPrivacyCircuit::compute_commitment(Fp::from(balance_old), wrong_randomness_old);
+            TxPrivacyCircuit::compute_commitment(Fr::from(balance_old), wrong_randomness_old);
         let commitment_new =
-            TxPrivacyCircuit::compute_commitment(Fp::from(balance_new), randomness_new);
+            TxPrivacyCircuit::compute_commitment(Fr::from(balance_new), randomness_new);
         let merkle_root =
             TxPrivacyCircuit::compute_merkle_root(wrong_commitment_old, &siblings, &indices);
 
         // Circuit uses the CORRECT randomness internally
         let circuit = TxPrivacyCircuit {
-            balance_old: Value::known(Fp::from(balance_old)),
-            balance_new: Value::known(Fp::from(balance_new)),
+            balance_old: Value::known(Fr::from(balance_old)),
+            balance_new: Value::known(Fr::from(balance_new)),
             randomness_old: Value::known(randomness_old), // Correct randomness
             randomness_new: Value::known(randomness_new),
-            amount: Value::known(Fp::from(amount)),
+            amount: Value::known(Fr::from(amount)),
             merkle_siblings: siblings.iter().map(|s| Value::known(*s)).collect(),
             merkle_indices: indices
                 .iter()
-                .map(|&b| Value::known(if b { Fp::from(1u64) } else { Fp::from(0u64) }))
+                .map(|&b| Value::known(if b { Fr::from(1u64) } else { Fr::from(0u64) }))
                 .collect(),
         };
 

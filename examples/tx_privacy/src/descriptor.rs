@@ -7,7 +7,7 @@ use halo2_proofs::{
     dev::{MockProver, VerifyFailure},
     plonk::{Circuit, ConstraintSystem},
 };
-use halo2curves::pasta::Fp;
+use halo2curves::bn256::Fr;
 use serde::{Deserialize, Serialize};
 use zerostyl_circuits::{
     CircuitDescriptor, CircuitError, CircuitIntrospection, FailureEntry, FailureKind, FieldType,
@@ -140,7 +140,7 @@ fn parse_bool_str(s: &str, field: &str) -> Result<bool> {
     Ok(v != 0)
 }
 
-fn parse_field(s: &str) -> Result<Fp> {
+fn parse_field(s: &str) -> Result<Fr> {
     use halo2curves::group::ff::PrimeField;
     if let Some(hex_str) = s.strip_prefix("0x") {
         let bytes = hex::decode(hex_str)
@@ -148,10 +148,10 @@ fn parse_field(s: &str) -> Result<Fp> {
         let mut repr = [0u8; 32];
         let len = bytes.len().min(32);
         repr[..len].copy_from_slice(&bytes[..len]);
-        Option::from(Fp::from_repr(repr))
+        Option::from(Fr::from_repr(repr))
             .ok_or_else(|| CircuitError::InvalidWitness(format!("invalid field element '{s}'")))
     } else {
-        Ok(Fp::from(parse_u64(s, "field")?))
+        Ok(Fr::from(parse_u64(s, "field")?))
     }
 }
 
@@ -162,7 +162,7 @@ fn parse_witness(json: &str) -> Result<WitnessJson> {
 
 struct ParsedInputs {
     circuit: TxPrivacyCircuit,
-    public_inputs: Vec<Vec<Fp>>,
+    public_inputs: Vec<Vec<Fr>>,
 }
 
 fn build_inputs(w: &WitnessJson) -> Result<ParsedInputs> {
@@ -184,7 +184,7 @@ fn build_inputs(w: &WitnessJson) -> Result<ParsedInputs> {
     let randomness_old = parse_field(&w.randomness_old)?;
     let randomness_new = parse_field(&w.randomness_new)?;
     let amount = parse_u64(&w.amount, "amount")?;
-    let siblings: Vec<Fp> =
+    let siblings: Vec<Fr> =
         w.merkle_siblings.iter().map(|s| parse_field(s)).collect::<Result<_>>()?;
     let indices: Vec<bool> = w
         .merkle_indices
@@ -193,9 +193,9 @@ fn build_inputs(w: &WitnessJson) -> Result<ParsedInputs> {
         .collect::<Result<_>>()?;
 
     let commitment_old =
-        TxPrivacyCircuit::compute_commitment(Fp::from(balance_old), randomness_old);
+        TxPrivacyCircuit::compute_commitment(Fr::from(balance_old), randomness_old);
     let commitment_new =
-        TxPrivacyCircuit::compute_commitment(Fp::from(balance_new), randomness_new);
+        TxPrivacyCircuit::compute_commitment(Fr::from(balance_new), randomness_new);
     let merkle_root = TxPrivacyCircuit::compute_merkle_root(commitment_old, &siblings, &indices);
 
     let circuit = TxPrivacyCircuit::from_raw(
@@ -214,7 +214,7 @@ fn build_inputs(w: &WitnessJson) -> Result<ParsedInputs> {
     })
 }
 
-fn encode_public_inputs(inputs: &[Vec<Fp>]) -> String {
+fn encode_public_inputs(inputs: &[Vec<Fr>]) -> String {
     use halo2curves::group::ff::PrimeField;
     let rows: Vec<Vec<String>> = inputs
         .iter()
@@ -224,7 +224,7 @@ fn encode_public_inputs(inputs: &[Vec<Fp>]) -> String {
         .expect("PublicInputsJson serialization is infallible")
 }
 
-fn decode_public_inputs(json: &str) -> Result<Vec<Vec<Fp>>> {
+fn decode_public_inputs(json: &str) -> Result<Vec<Vec<Fr>>> {
     let parsed: PublicInputsJson = serde_json::from_str(json)?;
     parsed.inputs.iter().map(|row| row.iter().map(|s| parse_field(s)).collect()).collect()
 }
@@ -264,7 +264,7 @@ fn convert_failure(f: &VerifyFailure) -> FailureEntry {
             column: None,
             details,
         },
-        VerifyFailure::Lookup { lookup_index, location } => FailureEntry {
+        VerifyFailure::Lookup { lookup_index, location, .. } => FailureEntry {
             kind: FailureKind::Lookup,
             gate_name: Some(format!("lookup[{lookup_index}]")),
             region: Some(format!("{location}")),
@@ -278,6 +278,14 @@ fn convert_failure(f: &VerifyFailure) -> FailureEntry {
             region: Some(format!("{location}")),
             row: None,
             column: Some(format!("{column}")),
+            details,
+        },
+        _ => FailureEntry {
+            kind: FailureKind::ConstraintNotSatisfied,
+            gate_name: None,
+            region: None,
+            row: None,
+            column: None,
             details,
         },
     }
@@ -386,7 +394,7 @@ impl CircuitDescriptor for TxPrivacyDescriptor {
     }
 
     fn inspect(&self) -> Result<CircuitIntrospection> {
-        let mut cs = ConstraintSystem::<Fp>::default();
+        let mut cs = ConstraintSystem::<Fr>::default();
         let _ = TxPrivacyCircuit::configure(&mut cs);
         let debug = format!("{:?}", cs.pinned());
 

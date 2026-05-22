@@ -6,8 +6,8 @@
 
 use halo2_proofs::dev::MockProver;
 use halo2_proofs::plonk::{keygen_vk, Circuit};
-use halo2_proofs::poly::commitment::Params;
-use halo2curves::pasta::{EqAffine, Fp as TestField};
+use halo2_proofs::poly::kzg::commitment::ParamsKZG;
+use halo2curves::bn256::{Bn256, Fr as TestField};
 use zerostyl_compiler::{parse_contract, transform_to_ir, CircuitBuilder};
 
 #[test]
@@ -169,7 +169,8 @@ fn test_without_witnesses_works_for_keygen() {
     // It must produce Value::unknown() witnesses (not Value::known(ZERO)),
     // so that keygen succeeds regardless of constraint bounds.
     let k = circuit_no_witnesses.ir.circuit_config.k();
-    let params = Params::<EqAffine>::new(k);
+    let params =
+        halo2_proofs::poly::kzg::commitment::ParamsKZG::<Bn256>::setup(k, rand::rngs::OsRng);
     let vk = keygen_vk(&params, &circuit_no_witnesses);
     assert!(vk.is_ok(), "keygen_vk must succeed with without_witnesses()");
 }

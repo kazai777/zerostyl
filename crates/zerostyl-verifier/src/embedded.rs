@@ -11,7 +11,7 @@ use halo2_proofs::{
     plonk::{keygen_vk, VerifyingKey},
     poly::commitment::Params,
 };
-use halo2curves::pasta::EqAffine;
+use halo2curves::bn256::G1Affine;
 
 use crate::reference_circuit::ReferenceCircuit;
 
@@ -26,7 +26,7 @@ pub fn embedded_params_bytes() -> &'static [u8] {
 }
 
 /// Load the embedded commitment parameters
-pub fn load_embedded_params() -> Result<Params<EqAffine>, VerifyError> {
+pub fn load_embedded_params() -> Result<Params<G1Affine>, VerifyError> {
     if PARAMS_BYTES.is_empty() {
         return Err(Vec::from(b"Embedded params are empty"));
     }
@@ -41,7 +41,7 @@ pub fn load_embedded_params() -> Result<Params<EqAffine>, VerifyError> {
 ///
 /// halo2_proofs 0.3.2 does not support VK serialization, so the VK
 /// is regenerated at runtime using `keygen_vk`.
-pub fn load_embedded_vk() -> Result<VerifyingKey<EqAffine>, VerifyError> {
+pub fn load_embedded_vk() -> Result<VerifyingKey<G1Affine>, VerifyError> {
     let params = load_embedded_params()?;
     let circuit = ReferenceCircuit::default();
     keygen_vk(&params, &circuit).map_err(|e| {

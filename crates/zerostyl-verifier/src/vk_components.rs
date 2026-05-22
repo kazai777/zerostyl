@@ -3,9 +3,9 @@
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 
+use halo2curves::bn256::{Fr, G1Affine};
 use halo2curves::group::ff::PrimeField;
 use halo2curves::group::GroupEncoding;
-use halo2curves::pasta::{EqAffine, Fp};
 use serde::{Deserialize, Serialize};
 
 /// Serializable VK components extracted from halo2 VerifyingKey.
@@ -55,17 +55,17 @@ impl VkComponents {
     }
 
     /// Deserialize the domain generator omega from its byte representation.
-    pub fn get_omega(&self) -> Result<Fp, &'static str> {
+    pub fn get_omega(&self) -> Result<Fr, &'static str> {
         if self.omega.len() != 32 {
             return Err("Invalid omega length");
         }
         let mut bytes = [0u8; 32];
         bytes.copy_from_slice(&self.omega);
-        Option::from(Fp::from_repr(bytes)).ok_or("Failed to deserialize omega")
+        Option::from(Fr::from_repr(bytes)).ok_or("Failed to deserialize omega")
     }
 
     /// Deserialize a fixed commitment at the given index.
-    pub fn get_fixed_commitment(&self, index: usize) -> Result<EqAffine, &'static str> {
+    pub fn get_fixed_commitment(&self, index: usize) -> Result<G1Affine, &'static str> {
         if index >= self.fixed_commitments.len() {
             return Err("Fixed commitment index out of bounds");
         }
@@ -73,7 +73,7 @@ impl VkComponents {
     }
 
     /// Deserialize a permutation commitment at the given index.
-    pub fn get_permutation_commitment(&self, index: usize) -> Result<EqAffine, &'static str> {
+    pub fn get_permutation_commitment(&self, index: usize) -> Result<G1Affine, &'static str> {
         if index >= self.permutation_commitments.len() {
             return Err("Permutation commitment index out of bounds");
         }
@@ -81,39 +81,41 @@ impl VkComponents {
     }
 
     /// Deserialize all fixed commitments.
-    pub fn get_all_fixed_commitments(&self) -> Result<Vec<EqAffine>, &'static str> {
+    pub fn get_all_fixed_commitments(&self) -> Result<Vec<G1Affine>, &'static str> {
         self.fixed_commitments.iter().map(|b| deserialize_affine_point(b)).collect()
     }
 
     /// Deserialize all permutation commitments.
-    pub fn get_all_permutation_commitments(&self) -> Result<Vec<EqAffine>, &'static str> {
+    pub fn get_all_permutation_commitments(&self) -> Result<Vec<G1Affine>, &'static str> {
         self.permutation_commitments.iter().map(|b| deserialize_affine_point(b)).collect()
     }
 }
 
 /// Serialize an affine curve point to its compressed byte representation.
-pub fn serialize_affine_point(point: &EqAffine) -> Vec<u8> {
+pub fn serialize_affine_point(point: &G1Affine) -> Vec<u8> {
     point.to_bytes().as_ref().to_vec()
 }
 
-fn deserialize_affine_point(bytes: &[u8]) -> Result<EqAffine, &'static str> {
+fn deserialize_affine_point(bytes: &[u8]) -> Result<G1Affine, &'static str> {
+    use halo2curves::bn256::G1Compressed;
+    use halo2curves::group::GroupEncoding;
     if bytes.len() != 32 {
         return Err("Invalid affine point length");
     }
-    let mut fixed_bytes = [0u8; 32];
-    fixed_bytes.copy_from_slice(bytes);
-    Option::from(EqAffine::from_bytes(&fixed_bytes)).ok_or("Failed to deserialize affine point")
+    let mut compressed = G1Compressed::default();
+    compressed.as_mut().copy_from_slice(bytes);
+    Option::from(G1Affine::from_bytes(&compressed)).ok_or("Failed to deserialize affine point")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use halo2curves::bn256::G1;
     use halo2curves::group::{Curve, Group};
-    use halo2curves::pasta::Eq;
 
     #[test]
     fn test_affine_point_serialization() {
-        let point = Eq::generator().to_affine();
+        let point = G1::generator().to_affine();
         let bytes = serialize_affine_point(&point);
         assert_eq!(bytes.len(), 32); // Compressed format
         let recovered = deserialize_affine_point(&bytes).unwrap();
@@ -169,7 +171,7 @@ mod tests {
 
     #[test]
     fn test_get_omega_valid() {
-        let omega_value = Fp::from(42);
+        let omega_value = Fr::from(42);
         let omega_bytes = omega_value.to_repr();
 
         let vk = VkComponents {
@@ -212,7 +214,7 @@ mod tests {
 
     #[test]
     fn test_get_fixed_commitment_valid() {
-        let point = Eq::generator().to_affine();
+        let point = G1::generator().to_affine();
         let point_bytes = serialize_affine_point(&point);
 
         let vk = VkComponents {
@@ -255,7 +257,7 @@ mod tests {
 
     #[test]
     fn test_get_permutation_commitment_valid() {
-        let point = Eq::generator().to_affine();
+        let point = G1::generator().to_affine();
         let point_bytes = serialize_affine_point(&point);
 
         let vk = VkComponents {
@@ -298,8 +300,8 @@ mod tests {
 
     #[test]
     fn test_get_all_fixed_commitments() {
-        let point1 = Eq::generator().to_affine();
-        let point2 = (Eq::generator() * Fp::from(2)).to_affine();
+        let point1 = G1::generator().to_affine();
+        let point2 = (G1::generator() * Fr::from(2)).to_affine();
 
         let vk = VkComponents {
             k: 10,
@@ -327,8 +329,8 @@ mod tests {
 
     #[test]
     fn test_get_all_permutation_commitments() {
-        let point1 = Eq::generator().to_affine();
-        let point2 = (Eq::generator() * Fp::from(2)).to_affine();
+        let point1 = G1::generator().to_affine();
+        let point2 = (G1::generator() * Fr::from(2)).to_affine();
 
         let vk = VkComponents {
             k: 10,

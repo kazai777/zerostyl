@@ -1,7 +1,7 @@
 //! Tests for circuit.rs module
 
 use halo2_proofs::plonk::Circuit;
-use halo2curves::pasta::Fp as TestField;
+use halo2curves::bn256::Fr as TestField;
 use zerostyl_compiler::{
     parse_contract, transform_to_ir, validate_circuit_ir, CircuitBuilder, CompilerError,
 };
@@ -510,11 +510,11 @@ fn test_public_inputs_allocation() {
 
 #[test]
 fn test_max_single_row_constant() {
-    use halo2curves::pasta::Fp;
+    use halo2curves::bn256::Fr;
     use zerostyl_compiler::ZkCircuit;
 
-    assert_eq!(ZkCircuit::<Fp>::MAX_SINGLE_ROW_WITNESSES, 10);
-    assert_eq!(ZkCircuit::<Fp>::MAX_PUBLIC_INPUTS, 5);
+    assert_eq!(ZkCircuit::<Fr>::MAX_SINGLE_ROW_WITNESSES, 10);
+    assert_eq!(ZkCircuit::<Fr>::MAX_PUBLIC_INPUTS, 5);
 }
 
 // ============================================================================

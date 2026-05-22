@@ -3,14 +3,14 @@ use halo2_proofs::{
     circuit::{Layouter, SimpleFloorPlanner, Value},
     plonk::{Circuit, Column, ConstraintSystem, Error, Instance},
 };
-use halo2curves::pasta::Fp;
+use halo2curves::bn256::Fr;
 use zerostyl_compiler::gadgets::{
     PoseidonCommitmentChip, PoseidonCommitmentConfig, RangeProofChip, RangeProofConfig,
 };
 #[derive(Clone, Debug, Default)]
 pub struct DepositCircuit {
-    pub amount: Value<Fp>,
-    pub amount_nonce: Value<Fp>,
+    pub amount: Value<Fr>,
+    pub amount_nonce: Value<Fr>,
 }
 #[derive(Debug, Clone)]
 pub struct DepositCircuitConfig {
@@ -18,13 +18,13 @@ pub struct DepositCircuitConfig {
     range_config: RangeProofConfig,
     instance: Column<Instance>,
 }
-impl Circuit<Fp> for DepositCircuit {
+impl Circuit<Fr> for DepositCircuit {
     type Config = DepositCircuitConfig;
     type FloorPlanner = SimpleFloorPlanner;
     fn without_witnesses(&self) -> Self {
         Self::default()
     }
-    fn configure(meta: &mut ConstraintSystem<Fp>) -> Self::Config {
+    fn configure(meta: &mut ConstraintSystem<Fr>) -> Self::Config {
         let poseidon_config = PoseidonCommitmentChip::configure(meta);
         let range_config = RangeProofChip::configure(meta);
         let instance = meta.instance_column();
@@ -34,7 +34,7 @@ impl Circuit<Fp> for DepositCircuit {
     fn synthesize(
         &self,
         config: Self::Config,
-        mut layouter: impl Layouter<Fp>,
+        mut layouter: impl Layouter<Fr>,
     ) -> std::result::Result<(), Error> {
         let poseidon_chip = PoseidonCommitmentChip::construct(config.poseidon_config);
         let range_chip = RangeProofChip::construct(config.range_config);
@@ -60,8 +60,8 @@ impl Circuit<Fp> for DepositCircuit {
         range_chip.check_range_bounded(
             layouter.namespace(|| "range check amount"),
             amount_range_value,
-            Fp::from((1000) as u64),
-            Fp::from((100000) as u64),
+            Fr::from((1000) as u64),
+            Fr::from((100000) as u64),
             256usize,
         )?;
         Ok(())
