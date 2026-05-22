@@ -22,6 +22,7 @@ exclude = [
     "contracts/state_mask_verifier",
     "contracts/private_vote_verifier",
     "contracts/private_swap_verifier",
+    "crates/zerostyl-sp1",
 ]
 
 [workspace.package]

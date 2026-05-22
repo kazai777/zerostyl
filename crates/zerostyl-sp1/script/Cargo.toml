@@ -1,0 +1,13 @@
+[package]
+name = "zerostyl-sp1-script"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+sp1-sdk = "=6.2.1"
+
+[[bin]]
+name = "zerostyl-sp1-script"
+path = "src/main.rs"

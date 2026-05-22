@@ -1,0 +1,15 @@
+[workspace]
+resolver = "2"
+members = ["program", "script"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["kazai777 <kazai777.dev@gmail.com>"]
+license = "MIT"
+repository = "https://github.com/kazai777/zerostyl"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
