@@ -111,7 +111,7 @@ fn deserialize_affine_point(bytes: &[u8]) -> Result<G1Affine, &'static str> {
 mod tests {
     use super::*;
     use halo2curves::bn256::G1;
-    use halo2curves::group::{Curve, Group};
+    use halo2curves::group::Curve;
 
     #[test]
     fn test_affine_point_serialization() {

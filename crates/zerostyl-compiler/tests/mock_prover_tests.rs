@@ -6,7 +6,6 @@
 
 use halo2_proofs::dev::MockProver;
 use halo2_proofs::plonk::{keygen_vk, Circuit};
-use halo2_proofs::poly::kzg::commitment::ParamsKZG;
 use halo2curves::bn256::{Bn256, Fr as TestField};
 use zerostyl_compiler::{parse_contract, transform_to_ir, CircuitBuilder};
 

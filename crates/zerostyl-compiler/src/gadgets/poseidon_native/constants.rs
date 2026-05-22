@@ -12,7 +12,7 @@
 // behind pub(crate), so its public API can't be reused for a hash(Fr, Fr) -> Fr wrapper.
 
 use halo2curves::bn256::Fr as Fp;
-use halo2curves::group::ff::{Field, PrimeField};
+use halo2curves::group::ff::PrimeField;
 use lazy_static::lazy_static;
 
 lazy_static! {

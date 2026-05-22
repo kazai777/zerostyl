@@ -7,13 +7,10 @@
 use anyhow::{Context, Result};
 use halo2_proofs::{
     plonk::{create_proof, verify_proof, Circuit, ProvingKey, VerifyingKey},
-    poly::{
-        commitment::ParamsProver,
-        kzg::{
-            commitment::{KZGCommitmentScheme, ParamsKZG},
-            multiopen::{ProverSHPLONK, VerifierSHPLONK},
-            strategy::SingleStrategy,
-        },
+    poly::kzg::{
+        commitment::{KZGCommitmentScheme, ParamsKZG},
+        multiopen::{ProverSHPLONK, VerifierSHPLONK},
+        strategy::SingleStrategy,
     },
     transcript::{Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer},
 };
