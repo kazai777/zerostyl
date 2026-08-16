@@ -1,9 +1,12 @@
 //! Error types for ZeroStyl toolkit
 
+#[cfg(not(feature = "std"))]
+use alloc::string::String;
+
 use thiserror::Error;
 
 /// Result type alias for ZeroStyl operations
-pub type Result<T> = std::result::Result<T, ZeroStylError>;
+pub type Result<T> = core::result::Result<T, ZeroStylError>;
 
 /// Main error type for ZeroStyl operations
 #[derive(Debug, Error)]
@@ -20,7 +23,8 @@ pub enum ZeroStylError {
     #[error("Serialization error: {0}")]
     SerializationError(String),
 
-    /// I/O error wrapper
+    /// I/O error wrapper (std-only)
+    #[cfg(feature = "std")]
     #[error("I/O error: {0}")]
     IoError(#[from] std::io::Error),
 
