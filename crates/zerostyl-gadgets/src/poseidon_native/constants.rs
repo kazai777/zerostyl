@@ -11,6 +11,8 @@
 // Vendored rather than depended upon because poseidon-circuit hides Hash / permute
 // behind pub(crate), so its public API can't be reused for a hash(Fr, Fr) -> Fr wrapper.
 
+#[cfg(not(test))]
+use alloc::{vec, vec::Vec};
 use halo2curves::bn256::Fr as Fp;
 use halo2curves::group::ff::PrimeField;
 use lazy_static::lazy_static;

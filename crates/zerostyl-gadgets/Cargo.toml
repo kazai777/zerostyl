@@ -1,0 +1,28 @@
+[package]
+name = "zerostyl-gadgets"
+version = "0.1.0"
+edition = "2021"
+authors = ["kazai777 <kazai777.dev@gmail.com>"]
+license = "MIT"
+description = "no_std halo2 circuit gadgets (Poseidon, Merkle, range, comparison) for ZeroStyl privacy circuits"
+repository = "https://github.com/kazai777/zerostyl"
+keywords = ["halo2", "zero-knowledge", "poseidon", "merkle", "zk-snarks"]
+categories = ["cryptography", "no-std"]
+
+[dependencies]
+# no_std: halo2_proofs still links std on targets that provide it (e.g. wasm32), but does not
+# require the std feature set here. default-features off keeps rand/multicore out of the build.
+halo2_proofs = { version = "=0.3.0", default-features = false }
+halo2_poseidon = "0.1"
+halo2curves = { version = "0.6", default-features = false, features = ["bits"] }
+lazy_static = { version = "1.5", features = ["spin_no_std"] }
+
+# On wasm32 the transitive `ff`/`rand_core` dependency pulls `getrandom`, which refuses to build
+# for wasm*-unknown-unknown without a randomness source. The `custom` feature lets the rlib
+# compile; the actual `__getrandom_custom` symbol is supplied by the final binary (e.g. the Stylus
+# verifier registers one). Circuit building/verification never actually draws randomness.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", default-features = false, features = ["custom"] }
+
+[dev-dependencies]
+halo2_proofs = { version = "=0.3.0", features = ["dev-graph"] }

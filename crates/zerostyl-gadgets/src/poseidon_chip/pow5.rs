@@ -1,6 +1,8 @@
-use std::convert::TryInto;
-use std::iter;
+use core::convert::TryInto;
+use core::iter;
 
+#[cfg(not(test))]
+use alloc::{format, vec::Vec};
 use halo2_proofs::{
     circuit::{AssignedCell, Cell, Chip, Layouter, Region, Value},
     plonk::{Advice, Any, Column, ConstraintSystem, Error, Expression, Fixed, Selector},
@@ -145,7 +147,7 @@ impl<F: Field, const WIDTH: usize, const RATE: usize> Pow5Chip<F, WIDTH, RATE> {
                 mid(idx, meta) + rc_b - next(idx, meta)
             };
 
-            std::iter::empty()
+            core::iter::empty()
                 // state[0] round a
                 .chain(Some(pow_5(cur_0 + rc_a0) - mid_0.clone()))
                 // state[0] round b

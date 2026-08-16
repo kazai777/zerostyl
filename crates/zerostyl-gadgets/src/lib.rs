@@ -1,14 +1,22 @@
 //! Reusable halo2 circuit gadgets for ZeroStyl.
 //!
-//! This module provides production-ready building blocks for privacy-preserving circuits:
+//! Production-ready building blocks for privacy-preserving circuits:
 //!
 //! - [`PoseidonCommitmentChip`] — Poseidon hash commitment: `commitment = Poseidon(value, randomness)`
-//! - [`MerkleTreeChip`] — Poseidon-based Merkle tree membership verification (depth up to 64)
+//! - [`MerkleTreeChip`] — Poseidon-based Merkle tree membership verification (default depth 32)
 //! - [`RangeProofChip`] — Bit-decomposition range proof (8/16/32/64 bits)
 //! - [`ComparisonChip`] — Ordering proofs (`>`, `>=`, `<`, `<=`) via range-checked differences
 //!
-//! All gadgets use the Pasta Fp field and the P128Pow5T3 Poseidon specification
-//! (128-bit security, x^5 S-box, width=3, rate=2).
+//! All gadgets operate over the BN254 scalar field (`halo2curves::bn256::Fr`) and use the
+//! P128Pow5T3 Poseidon specification (128-bit security, x^5 S-box, width=3, rate=2).
+//!
+//! This crate is `no_std` (it only needs `alloc`) so the circuits built from these gadgets can be
+//! compiled for `wasm32` and embedded in an on-chain verifier, independently of the heavier
+//! `zerostyl-compiler` (prover/CLI) crate.
+
+#![cfg_attr(not(test), no_std)]
+
+extern crate alloc;
 
 pub mod comparison;
 pub mod merkle;

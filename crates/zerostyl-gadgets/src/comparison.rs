@@ -20,6 +20,8 @@
 //! small positive value, making the range check pass even though `a < b`
 //! in the integer sense.
 
+#[cfg(not(test))]
+use alloc::vec;
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, Value},
     plonk::{Advice, Column, ConstraintSystem, Error, Expression, Selector},

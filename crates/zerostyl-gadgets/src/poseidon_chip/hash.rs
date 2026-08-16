@@ -6,8 +6,10 @@
 // old meta.lookup signature), and the crate has no feature to disable
 // individual modules.
 
-use std::marker::PhantomData;
+use core::marker::PhantomData;
 
+#[cfg(not(test))]
+use alloc::format;
 use halo2_poseidon::{Absorbing, ConstantLength, Domain, Spec, SpongeMode, Squeezing, State};
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter},

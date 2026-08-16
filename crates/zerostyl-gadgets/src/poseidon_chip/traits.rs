@@ -4,7 +4,7 @@
 // in sinsemilla/ecc modules), and has no feature to skip those modules. So we
 // vendor only the Poseidon-chip-related infrastructure we actually need.
 
-use std::fmt;
+use core::fmt;
 
 use halo2_poseidon::{Absorbing, Domain, Spec, Squeezing, State};
 use halo2_proofs::{

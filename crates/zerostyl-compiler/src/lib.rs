@@ -7,8 +7,12 @@ pub mod ast;
 pub mod circuit;
 pub mod codegen;
 pub mod error;
-pub mod gadgets;
 pub mod parser;
+
+/// halo2 circuit gadgets. Re-exported from the standalone, `no_std` `zerostyl-gadgets` crate so
+/// existing `zerostyl_compiler::gadgets::*` paths keep working while the gadgets themselves can be
+/// compiled for `wasm32` independently of this (std-only) compiler crate.
+pub use zerostyl_gadgets as gadgets;
 
 pub use ast::{
     compute_k, ArithOp, CircuitIR, ComparisonOp, Constraint, HashType, InterFieldConstraint,
