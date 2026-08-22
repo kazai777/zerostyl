@@ -262,6 +262,22 @@ impl Circuit<Fr> for ZkCircuit<Fr> {
                             layouter.namespace(|| format!("load_cmp_thr_{}", idx)),
                             threshold,
                         )?;
+                        // ComparisonChip reduces `a OP b` to a range check on their difference,
+                        // which is only sound when both operands are already in [0, 2^64).
+                        // Without this, a witness of ≈ p wraps modulo the field and passes a
+                        // comparison it should fail. Range-check both operands first (on clones,
+                        // so the originals still flow into assert_*; copy_advice ties them
+                        // together).
+                        range_chip.check_range(
+                            layouter.namespace(|| format!("cmp_range_lhs_{}", idx)),
+                            witness_cell.clone(),
+                            64,
+                        )?;
+                        range_chip.check_range(
+                            layouter.namespace(|| format!("cmp_range_rhs_{}", idx)),
+                            threshold_cell.clone(),
+                            64,
+                        )?;
                         match operator {
                             ComparisonOp::GreaterThan => {
                                 comparison_chip.assert_gt(
@@ -307,11 +323,14 @@ impl Circuit<Fr> for ZkCircuit<Fr> {
                     Constraint::Commitment { .. }
                     | Constraint::ArithmeticRelation { .. }
                     | Constraint::MerkleProof { .. } => {
-                        // These are cross-field constraints that require hand-written circuits
-                        // (tx_privacy, private_vote, state_mask) using gadgets directly.
-                        // The generic builder cannot generate these constraints, so the field
-                        // is left unconstrained (assigned to general advice columns with a
-                        // warning). Do NOT mark field_constrained = true here.
+                        // Cross-field constraints (commitments, Merkle membership, arithmetic
+                        // relations) require hand-written circuits (tx_privacy, private_vote,
+                        // state_mask) that wire the gadgets together. The generic builder cannot
+                        // enforce them. Fail loudly here rather than silently leaving the witness
+                        // in an unconstrained advice cell — a circuit that *declares* such a
+                        // constraint but doesn't enforce it would be unsound (it would "prove"
+                        // nothing about the committed/related value).
+                        return Err(Halo2Error::Synthesis);
                     }
                 }
             }
@@ -341,12 +360,14 @@ impl Circuit<Fr> for ZkCircuit<Fr> {
             )?;
         }
 
-        // Assign public inputs from the instance column into advice cells.
-        // NOTE: In the generic builder, these public inputs are accessible but
-        // not linked to any private witness via constraints. The generic builder
-        // cannot infer cross-field relationships (e.g. commitment == Poseidon(witness)).
-        // Hand-written circuits (tx_privacy, state_mask, private_vote) handle this
-        // explicitly using constrain_instance() after computing derived values.
+        // Copy each public input from the instance column into an anchor advice cell.
+        // IMPORTANT: `assign_advice_from_instance` copy-constrains the instance value to that
+        // advice cell, but the generic builder does NOT reference the cell from any other gate,
+        // so the public input is not linked to any private witness. In other words the generic
+        // builder can range/boolean-check witnesses but cannot prove a relationship between a
+        // public input and a witness (e.g. commitment == Poseidon(witness)). Any circuit that
+        // needs meaningful public inputs must be hand-written (see tx_privacy / state_mask /
+        // private_vote, which derive the value in-circuit and bind it with constrain_instance).
         if !self.public_values.is_empty() {
             layouter.assign_region(
                 || "public_inputs",

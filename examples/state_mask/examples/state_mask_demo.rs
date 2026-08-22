@@ -33,7 +33,12 @@ fn main() {
     println!("  - Hidden balance: {} tokens", hidden_balance);
     println!();
 
-    let commitment = StateMaskCircuit::compute_commitment(Fr::from(state_value), nonce);
+    let commitment = StateMaskCircuit::compute_commitment(
+        Fr::from(state_value),
+        Fr::from(collateral_ratio),
+        Fr::from(hidden_balance),
+        nonce,
+    );
 
     println!("PUBLIC outputs (what the verifier sees):");
     println!(

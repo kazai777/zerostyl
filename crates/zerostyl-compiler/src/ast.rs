@@ -47,6 +47,10 @@ pub enum Constraint {
         operator: ComparisonOp,
         value: u64,
     },
+    // The variants below are cross-field constraints that the generic `CircuitBuilder` does NOT
+    // enforce — it returns a synthesis error if an IR declares them (see circuit.rs). They are
+    // kept as an IR vocabulary for hand-written circuits and future codegen; `transform_to_ir`
+    // never emits them today.
     Commitment {
         hash_type: HashType,
     },
@@ -83,6 +87,8 @@ pub enum ArithOp {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HashType {
+    /// Reserved: there is no Pedersen gadget yet, so this is never produced or honored.
+    /// Commitments in the shipped circuits use [`HashType::Poseidon`].
     Pedersen,
     Poseidon,
 }
@@ -92,6 +98,8 @@ pub struct CircuitIR {
     pub name: String,
     pub public_inputs: Vec<ZkField>,
     pub private_witnesses: Vec<ZkField>,
+    /// Reserved IR vocabulary for hand-written circuits / future codegen. `transform_to_ir` always
+    /// leaves this empty and the generic `CircuitBuilder` does not honor it.
     pub inter_field_constraints: Vec<InterFieldConstraint>,
     pub circuit_config: CircuitConfig,
 }
@@ -163,7 +171,11 @@ fn estimate_constraint_rows(constraint: &Constraint) -> usize {
         Constraint::Range { num_bits } => num_bits + 2,
         Constraint::Boolean => 3,
         Constraint::RangeProof { .. } => 128,
-        Constraint::Comparison { .. } => 68,
+        // A comparison now range-checks both operands (soundness: assert_* is only valid for
+        // in-range operands) plus the internal difference range check — three 64-bit range
+        // checks, ~66 rows each. Under-counting here picks too small a k and synthesis fails
+        // with NotEnoughRowsAvailable.
+        Constraint::Comparison { .. } => 200,
         Constraint::Commitment { .. } => 64,
         Constraint::MerkleProof { tree_depth, .. } => tree_depth * 64,
         Constraint::ArithmeticRelation { rhs_fields, .. } => 1 + rhs_fields.len(),
@@ -175,7 +187,8 @@ fn estimate_inter_field_rows(constraint: &InterFieldConstraint) -> usize {
         InterFieldConstraint::ArithmeticRelation { operands, .. } => 1 + operands.len(),
         InterFieldConstraint::MerkleVerification { .. } => 32 * 64,
         InterFieldConstraint::CommitmentVerification { .. } => 64,
-        InterFieldConstraint::ComparisonCheck { .. } => 68,
+        // Same three-range-check cost as Constraint::Comparison.
+        InterFieldConstraint::ComparisonCheck { .. } => 200,
     }
 }
 
@@ -439,8 +452,8 @@ mod tests {
             }],
             circuit_config: CircuitConfig::minimal(4).unwrap(),
         };
-        // (1 + 66 + 68) * 2 = 270
-        assert_eq!(ir.estimate_rows(), 270);
+        // witness range(64)=66, inter-field comparison=200: (1 + 66 + 200) * 2 = 534
+        assert_eq!(ir.estimate_rows(), 534);
     }
 
     #[test]

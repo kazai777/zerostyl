@@ -11,6 +11,9 @@
 //! - `commitment_old`: `Poseidon(balance_old, randomness_old)`
 //! - `commitment_new`: `Poseidon(balance_new, randomness_new)`
 //! - `merkle_root`: Root of the account Merkle tree
+//! - `nullifier`: `Poseidon(Poseidon(randomness_old, balance_old), NULLIFIER_DOMAIN)` —
+//!   deterministic per spent note, unlinkable to `commitment_old`, used on-chain for double-spend
+//!   prevention
 //!
 //! Private Witnesses:
 //! - `balance_old`, `balance_new`: Account balances
@@ -25,6 +28,8 @@
 //! 3. `balance_old - amount == balance_new`
 //! 4. `MerkleVerify(commitment_old, siblings, indices) == merkle_root`
 //! 5. `amount ∈ [0, 2^64)`
+//! 6. `balance_new ∈ [0, 2^64)` — prevents field-underflow of the balance equation
+//! 7. `nullifier == Poseidon(Poseidon(randomness_old, balance_old), NULLIFIER_DOMAIN)`
 
 pub mod descriptor;
 
@@ -42,6 +47,15 @@ use zerostyl_compiler::gadgets::{
 
 /// Standard Merkle tree depth (supports ~4 billion leaves).
 pub const MERKLE_DEPTH: usize = 32;
+
+/// Domain separator folded into the nullifier hash (`"zerostyl"` as an ASCII u64).
+///
+/// The nullifier is `Poseidon(Poseidon(randomness, balance), NULLIFIER_DOMAIN)`. Without the
+/// domain fold, `nullifier = Poseidon(randomness, balance)` collides with
+/// `commitment = Poseidon(balance, randomness)` exactly when `balance == randomness`, publicly
+/// linking the spent leaf. The domain constant makes the nullifier and commitment hashes
+/// unrelatable regardless of the witness values.
+pub const NULLIFIER_DOMAIN: u64 = 0x7a65_726f_7374_796c;
 
 /// Configuration for the transaction privacy circuit.
 #[derive(Debug, Clone)]
@@ -161,6 +175,20 @@ impl TxPrivacyCircuit {
         PoseidonCommitmentChip::hash_outside_circuit(balance, randomness)
     }
 
+    /// Computes the transfer nullifier: `Poseidon(Poseidon(randomness, balance), NULLIFIER_DOMAIN)`.
+    ///
+    /// Bound to the same `(balance, randomness)` witnesses as `commitment_old` (so it is provably
+    /// tied to the spent note) but folded with [`NULLIFIER_DOMAIN`], so it is unlinkable to the
+    /// public `commitment_old` (the Merkle leaf) for *all* witness values — including the
+    /// degenerate `balance == randomness` case, where a plain input-swap would make the nullifier
+    /// equal the commitment. Deterministic per note, which is what lets the on-chain contract
+    /// reject double-spends without revealing which leaf was spent.
+    #[must_use]
+    pub fn compute_nullifier(balance: Fr, randomness: Fr) -> Fr {
+        let pre = PoseidonCommitmentChip::hash_outside_circuit(randomness, balance);
+        PoseidonCommitmentChip::hash_outside_circuit(pre, Fr::from(NULLIFIER_DOMAIN))
+    }
+
     /// Computes the Merkle root outside the circuit (for witness generation).
     #[must_use]
     pub fn compute_merkle_root(leaf: Fr, siblings: &[Fr], indices: &[bool]) -> Fr {
@@ -247,7 +275,7 @@ impl Circuit<Fr> for TxPrivacyCircuit {
         let commitment_old = poseidon_chip.commit(
             layouter.namespace(|| "commitment_old"),
             balance_old_cell.clone(),
-            randomness_old_cell,
+            randomness_old_cell.clone(),
         )?;
 
         // 2. commitment_new = Poseidon(balance_new, randomness_new)
@@ -279,8 +307,46 @@ impl Circuit<Fr> for TxPrivacyCircuit {
             },
         )?;
 
-        // 4. Range check: amount ∈ [0, 2^64)
+        // 4a. Range check: amount ∈ [0, 2^64)
         range_chip.check_range(layouter.namespace(|| "range check amount"), amount_cell, 64)?;
+
+        // 4b. Range check: balance_new ∈ [0, 2^64). Without this, a prover could satisfy the
+        // balance gate `balance_old - amount = balance_new` with a field-underflowed balance_new
+        // (≈ p), minting a bogus commitment on a near-infinite balance.
+        range_chip.check_range(
+            layouter.namespace(|| "range check balance_new"),
+            balance_new_cell.clone(),
+            64,
+        )?;
+
+        // 4c. Nullifier = Poseidon(Poseidon(randomness_old, balance_old), NULLIFIER_DOMAIN).
+        // Reuses the exact witness cells bound into commitment_old (so it is provably tied to the
+        // spent note), then folds in a fixed domain constant so the nullifier is unlinkable to the
+        // public commitment/leaf for all witnesses — a plain input-swap collides with the
+        // commitment when balance_old == randomness_old. The domain constant is pinned via
+        // assign_advice_from_constant (the poseidon config enables constants), so a malicious
+        // prover cannot substitute a different domain.
+        let nullifier_pre = poseidon_chip.hash_two(
+            layouter.namespace(|| "nullifier pre-hash"),
+            randomness_old_cell,
+            balance_old_cell.clone(),
+        )?;
+        let nullifier_domain_cell = layouter.assign_region(
+            || "nullifier domain constant",
+            |mut region| {
+                region.assign_advice_from_constant(
+                    || "nullifier domain",
+                    config.balance_advice[0],
+                    0,
+                    Fr::from(NULLIFIER_DOMAIN),
+                )
+            },
+        )?;
+        let nullifier = poseidon_chip.hash_two(
+            layouter.namespace(|| "nullifier"),
+            nullifier_pre,
+            nullifier_domain_cell,
+        )?;
 
         // 5. Load Merkle siblings and indices
         let sibling_cells: Vec<AssignedCell<Fr, Fr>> = self
@@ -316,6 +382,7 @@ impl Circuit<Fr> for TxPrivacyCircuit {
         layouter.constrain_instance(commitment_old_cell, config.instance, 0)?;
         layouter.constrain_instance(commitment_new.cell(), config.instance, 1)?;
         layouter.constrain_instance(computed_root.cell(), config.instance, 2)?;
+        layouter.constrain_instance(nullifier.cell(), config.instance, 3)?;
 
         Ok(())
     }
@@ -346,6 +413,7 @@ mod tests {
             TxPrivacyCircuit::compute_commitment(Fr::from(balance_new), randomness_new);
         let merkle_root =
             TxPrivacyCircuit::compute_merkle_root(commitment_old, &siblings, &indices);
+        let nullifier = TxPrivacyCircuit::compute_nullifier(Fr::from(balance_old), randomness_old);
 
         let circuit = TxPrivacyCircuit {
             balance_old: Value::known(Fr::from(balance_old)),
@@ -360,7 +428,7 @@ mod tests {
                 .collect(),
         };
 
-        (circuit, vec![commitment_old, commitment_new, merkle_root])
+        (circuit, vec![commitment_old, commitment_new, merkle_root, nullifier])
     }
 
     #[test]
@@ -399,6 +467,7 @@ mod tests {
         let commitment_new = TxPrivacyCircuit::compute_commitment(Fr::from(600u64), randomness_new);
         let merkle_root =
             TxPrivacyCircuit::compute_merkle_root(commitment_old, &siblings, &indices);
+        let nullifier = TxPrivacyCircuit::compute_nullifier(Fr::from(1000u64), randomness_old);
 
         let circuit = TxPrivacyCircuit {
             balance_old: Value::known(Fr::from(1000u64)),
@@ -413,7 +482,7 @@ mod tests {
                 .collect(),
         };
 
-        let public_inputs = vec![commitment_old, commitment_new, merkle_root];
+        let public_inputs = vec![commitment_old, commitment_new, merkle_root, nullifier];
         let prover = MockProver::run(TEST_K, &circuit, vec![public_inputs]).unwrap();
         assert!(prover.verify().is_err());
     }
@@ -525,6 +594,8 @@ mod tests {
             TxPrivacyCircuit::compute_commitment(Fr::from(balance_new), randomness_new);
         let merkle_root =
             TxPrivacyCircuit::compute_merkle_root(wrong_commitment_old, &siblings, &indices);
+        let nullifier =
+            TxPrivacyCircuit::compute_nullifier(Fr::from(balance_old), wrong_randomness_old);
 
         // Circuit uses the CORRECT randomness internally
         let circuit = TxPrivacyCircuit {
@@ -541,11 +612,49 @@ mod tests {
         };
 
         // Public inputs use wrong_commitment_old (from wrong randomness)
-        let public_inputs = vec![wrong_commitment_old, commitment_new, merkle_root];
+        let public_inputs = vec![wrong_commitment_old, commitment_new, merkle_root, nullifier];
         let prover = MockProver::run(TEST_K, &circuit, vec![public_inputs]).unwrap();
         assert!(
             prover.verify().is_err(),
             "Circuit must reject when randomness doesn't match commitment"
+        );
+    }
+
+    #[test]
+    fn test_tx_privacy_wrong_nullifier_rejected() {
+        // A valid transfer, but the caller supplies a forged nullifier as public input. The
+        // circuit recomputes nullifier = Poseidon(Poseidon(randomness_old, balance_old),
+        // NULLIFIER_DOMAIN) and binds it to instance[3], so a mismatch must fail — this is what
+        // stops a spender from replaying a note under a fresh, unseen nullifier.
+        let (circuit, mut public_inputs) = make_test_data(1000, 700, 300, TEST_DEPTH);
+        public_inputs[3] = Fr::from(123_456u64);
+        let prover = MockProver::run(TEST_K, &circuit, vec![public_inputs]).unwrap();
+        assert!(prover.verify().is_err(), "Circuit must reject a forged nullifier");
+    }
+
+    #[test]
+    fn test_tx_privacy_nullifier_unlinkable_to_commitment() {
+        // The nullifier must differ from commitment_old (else it would reveal the spent leaf).
+        let balance_old = Fr::from(1000u64);
+        let randomness_old = Fr::from(42u64);
+        let commitment = TxPrivacyCircuit::compute_commitment(balance_old, randomness_old);
+        let nullifier = TxPrivacyCircuit::compute_nullifier(balance_old, randomness_old);
+        assert_ne!(commitment, nullifier, "nullifier must not equal the public commitment");
+        // Deterministic per note.
+        assert_eq!(nullifier, TxPrivacyCircuit::compute_nullifier(balance_old, randomness_old));
+    }
+
+    #[test]
+    fn test_tx_privacy_nullifier_unlinkable_in_degenerate_case() {
+        // Regression: with a plain input-swap nullifier (Poseidon(randomness, balance)), the
+        // nullifier equals the commitment when balance == randomness, leaking the spent leaf.
+        // The domain fold makes them differ even here.
+        let v = Fr::from(777u64);
+        let commitment = TxPrivacyCircuit::compute_commitment(v, v);
+        let nullifier = TxPrivacyCircuit::compute_nullifier(v, v);
+        assert_ne!(
+            commitment, nullifier,
+            "nullifier must stay unlinkable even when balance == randomness"
         );
     }
 }

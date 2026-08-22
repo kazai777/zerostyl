@@ -43,7 +43,7 @@ pub struct NativeProver<C: Circuit<Fr>> {
 
 impl<C: Circuit<Fr> + Clone> NativeProver<C> {
     pub fn new(circuit: C, k: u32) -> Result<Self> {
-        let cache_dir = std::env::current_dir()?.join(".zerostyl_cache");
+        let cache_dir = std::env::current_dir()?.join(zerostyl_runtime::DEFAULT_CACHE_DIR);
         let key_manager = KeyManager::new(&cache_dir)?;
         Ok(Self { circuit, k, key_manager, proving_key: None, verifying_key: None, params: None })
     }
