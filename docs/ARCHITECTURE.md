@@ -105,6 +105,13 @@ The three SDKs live at [`packages/sdk-ts/`](../packages/sdk-ts/) (TypeScript),
 [`packages/sdk-py/`](../packages/sdk-py/) (Python). All consume the same
 `abi.json` contract (`zerostyl_circuits::abi::AbiSchema`).
 
+On the observability side, `zerostyl-runtime` defines the standardized
+`ZeroStylPrivacyTransaction` event (its `topic0()` is the log topic indexers filter on) and
+`BytecodeFingerprint` (`keccak256` circuit id). These are the primitives the **technical
+dashboard** consumes to track privacy activity on-chain — the event schema, its topic, a live
+fingerprint tool, and the deployed contract registry — served from the website
+(`/dashboard`).
+
 ### Detailed Flow Steps
 
 1. **Source Code Annotation**
@@ -304,6 +311,7 @@ strip = true            # Strip symbols
 - [Arbitrum Stylus Documentation](https://docs.arbitrum.io/stylus)
 - [halo2 Book](https://zcash.github.io/halo2/)
 - [ZK-STARK Whitepaper](https://eprint.iacr.org/2018/046.pdf)
+- [zk-STARKs feasibility study for ZeroStyl](./STARK_FEASIBILITY.md) — why halo2-KZG today, and the conditions under which a STARK backend would make sense
 - [Stylus Gas Benchmarks](https://github.com/OffchainLabs/stylus-sdk-rs/benchmarks)
 
 ---

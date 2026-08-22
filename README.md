@@ -24,6 +24,8 @@ Rust toolkit for building and debugging privacy-preserving smart contracts on Ar
 | `zerostyl-exporter` | ✅ Working | `#[zk_private]` → circuit + descriptor + privacy-safe ABI + `abi.json` |
 | `zerostyl-sdk` (Rust) | ✅ Working | Registry, prove/verify, witness building, ABI loading, proof envelope |
 | SDKs (TS / Python) | ✅ Working | `abi.json` → typed bindings ([`packages/sdk-ts`](packages/sdk-ts), [`packages/sdk-py`](packages/sdk-py)) |
+| `zerostyl-orbit` | ✅ Working | Per-chain size/gas/precompile profiles + deployability analysis ([`crates/zerostyl-orbit`](crates/zerostyl-orbit)) |
+| Technical dashboard | ✅ Working | Event schema + `topic0`, live keccak256 fingerprint tool, deployed registry — on the [website](https://zerostyl.dev/dashboard) |
 
 ---
 
@@ -165,6 +167,16 @@ zerostyl-sdk-py generate --abi examples/zk_private_demo/abi.json
 ```
 
 Proof generation from TS/Python (prover bindings) and on-chain submission helpers land in subsequent releases. See [`packages/sdk-ts/README.md`](packages/sdk-ts/README.md) for the TS reference and roadmap.
+
+---
+
+## Further reading
+
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — system design, proof system, size constraints.
+- [docs/EXTENDING.md](docs/EXTENDING.md) — add your own circuit (manual or `#[zk_private]`).
+- [docs/STARK_FEASIBILITY.md](docs/STARK_FEASIBILITY.md) — zk-STARKs feasibility: why halo2-KZG today, and when a post-quantum STARK backend would make sense.
+- [contracts/CONTRACTS.md](contracts/CONTRACTS.md) — deployed contracts and the honest on-chain verification model.
+- [CHANGELOG.md](CHANGELOG.md) and [docs/RELEASING.md](docs/RELEASING.md) — versioning policy and release/publish process.
 
 ---
 
