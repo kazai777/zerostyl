@@ -2,11 +2,13 @@
 resolver = "2"
 members = [
     "crates/zerostyl-circuits",
+    "crates/zerostyl-gadgets",
     "crates/zerostyl-compiler",
     "crates/zerostyl-cli",
     "crates/zerostyl-debugger",
     "crates/zerostyl-exporter",
     "crates/zerostyl-runtime",
+    "crates/zerostyl-sdk",
     "crates/zerostyl-verifier",
     "examples/example_demo",
     "examples/tx_privacy",
