@@ -14,3 +14,8 @@ node_modules/
 packages/**/dist/
 pnpm-debug.log
 .pnpm-store/
+
+# Python
+packages/**/.venv/
+__pycache__/
+*.egg-info/
