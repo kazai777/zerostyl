@@ -1,22 +1,22 @@
 [package]
 name = "zerostyl-sdk"
-version = "0.1.0"
-edition = "2021"
-authors = ["kazai777 <kazai777.dev@gmail.com>"]
-license = "MIT"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
 description = "Rust SDK for the ZeroStyl zk toolkit on Arbitrum Stylus: circuit registry, proving, ABI loading, and proof encoding"
-repository = "https://github.com/kazai777/zerostyl"
 keywords = ["arbitrum", "stylus", "zero-knowledge", "privacy", "zk-snarks"]
 categories = ["cryptography", "development-tools"]
 
 [dependencies]
 zerostyl-circuits = { path = "../zerostyl-circuits" }
 zerostyl-runtime = { path = "../zerostyl-runtime" }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-thiserror = "1.0"
-hex = "0.4"
+serde = { workspace = true, features = ["std"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true, features = ["std"] }
+hex = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
 zk_private_demo = { path = "../../examples/zk_private_demo" }
-tempfile = "3.0"
+tempfile = { workspace = true }
