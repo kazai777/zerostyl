@@ -73,7 +73,7 @@ turns these into a concrete deployability check.
   host I/O, which helps, but a full FRI verifier (many queries × Merkle paths × field arithmetic in
   a small field emulated inside the contract) is well over the 24 KB budget — the same size problem
   as halo2, arguably worse. So a *native, end-to-end post-quantum* on-chain verifier is **not
-  feasible on Stylus today** — and, notably, that is a property of the size/gas budget, not of
+  feasible on Stylus under current size and gas budgets** — and, notably, that is a property of the budget, not of
   ZeroStyl.
 - The pragmatic on-chain pattern used across the ecosystem (RISC Zero, Plonky2→circom, SP1) is to
   **wrap** the large transparent proof in a small **Groth16** SNARK and verify *that* on-chain via
@@ -83,7 +83,7 @@ turns these into a concrete deployability check.
 - **Caveat that matters:** wrapping a STARK in Groth16 for cheap on-chain verification **re-introduces
   a trusted setup and forfeits post-quantum security at the wrap layer**. You keep transparency and
   PQ for the *proving* pipeline, but the on-chain verification is once again pairing-based. True
-  end-to-end post-quantum *and* on-chain verification is not achievable on Stylus within today's size
+  end-to-end post-quantum *and* on-chain verification is not achievable within current Stylus size
   and gas budgets by any known construction.
 
 ## 5. What migration would cost ZeroStyl
@@ -120,7 +120,7 @@ Concretely, in priority order:
 1. **Short term — pursue the Groth16 wrap for on-chain verification**, keeping halo2-KZG for proving.
    This is what actually unblocks on-chain SNARK verification within the 24 KB Stylus budget (via the
    `0x08` precompile), and `zerostyl-orbit` already models its feasibility per chain. It does not
-   deliver post-quantum security, which is an accepted trade for a BN254 EVM-aligned toolkit today.
+   deliver post-quantum security, which is an accepted trade for a BN254 EVM-aligned toolkit.
 2. **Address the trusted-setup concern independently of STARKs** by replacing `DEV_SRS_SEED` with SRS
    from a real Powers-of-Tau ceremony before any mainnet use. This removes the most concrete of the
    two motivations without a backend change.

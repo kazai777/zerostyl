@@ -11,8 +11,7 @@ tag-message = "Release v{{version}}"
 pre-release-commit-message = "chore(release): v{{version}}"
 consolidate-commits = true
 
-# Do not push or publish automatically — publishing to crates.io is irreversible and, today, only
-# the halo2-free crates are publishable (see docs/RELEASING.md). Run the publish step manually,
-# crate by crate, in dependency order.
+# Pushing and publishing are disabled here; they are performed as explicit steps. Not every crate
+# is publishable to crates.io — see docs/RELEASING.md for the per-crate status and dependency order.
 push = false
 publish = false

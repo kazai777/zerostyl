@@ -68,8 +68,8 @@ bn256_pairing = true        # set false to model a chain that removed 0x08
 
 Analysis and configuration only — **no RPC, signing, or deployment**. Use `cargo-stylus` to deploy;
 the Brotli size here approximates it closely but is not byte-identical, so treat it as indicative.
-Built-in `chain_id`/ArbOS values reflect the state known at authoring time — override them with a
-TOML profile if they drift.
+Built-in `chain_id`/ArbOS values reflect published chain parameters that may change over time —
+override them with a TOML profile when needed.
 
 ## License
 

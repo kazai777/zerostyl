@@ -311,7 +311,7 @@ strip = true            # Strip symbols
 - [Arbitrum Stylus Documentation](https://docs.arbitrum.io/stylus)
 - [halo2 Book](https://zcash.github.io/halo2/)
 - [ZK-STARK Whitepaper](https://eprint.iacr.org/2018/046.pdf)
-- [zk-STARKs feasibility study for ZeroStyl](./STARK_FEASIBILITY.md) — why halo2-KZG today, and the conditions under which a STARK backend would make sense
+- [zk-STARKs feasibility study for ZeroStyl](./STARK_FEASIBILITY.md) — why halo2-KZG is the current choice, and the conditions under which a STARK backend would make sense
 - [Stylus Gas Benchmarks](https://github.com/OffchainLabs/stylus-sdk-rs/benchmarks)
 
 ---

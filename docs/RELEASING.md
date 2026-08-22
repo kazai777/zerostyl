@@ -1,8 +1,8 @@
 # Releasing
 
 ZeroStyl is a single-version workspace: every crate shares the version declared once in the root
-`Cargo.toml` under `[workspace.package]`. This document is the release checklist and the current
-publishability status.
+`Cargo.toml` under `[workspace.package]`. This document describes the release process and which
+crates are publishable to crates.io.
 
 ## Versioning
 
@@ -10,27 +10,27 @@ publishability status.
   only. See the policy note in [`CHANGELOG.md`](../CHANGELOG.md).
 - All crates move together (one version, one git tag).
 
-## Bump + tag a release
+## Bump and tag a release
 
 With [`cargo-release`](https://github.com/crate-ci/cargo-release) (config in `release.toml`):
 
 ```bash
 cargo release minor --execute      # bumps [workspace.package] version, updates CHANGELOG, commits
-git tag -a v0.2.0 -m "v0.2.0"      # release.toml keeps push/publish OFF; tag and push manually
+git tag -a v0.2.0 -m "v0.2.0"      # release.toml leaves push/publish off; tag and push explicitly
 git push origin main --tags
 ```
 
-Or manually: edit `version` in the root `Cargo.toml`, move the `CHANGELOG.md` `[Unreleased]` items
-under a dated `[x.y.z]` heading, commit, then `git tag`.
+Without the tool: edit `version` in the root `Cargo.toml`, move the `CHANGELOG.md` `[Unreleased]`
+items under a dated `[x.y.z]` heading, commit, then `git tag`.
 
 ## Publishing to crates.io
 
-> Publishing is **irreversible** — a version can only be *yanked*, never replaced. Always
-> `cargo publish -p <crate> --dry-run` first.
+A published version cannot be replaced, only *yanked*. Run `cargo publish -p <crate> --dry-run`
+before each real publish.
 
-### Publishable today (halo2-free)
+### Crates without a halo2 dependency
 
-These crates have no halo2 dependency and can be published now, **in dependency order**:
+These crates carry no halo2 dependency and are published in dependency order:
 
 ```bash
 cargo publish -p zerostyl-runtime      # no internal deps
@@ -39,31 +39,31 @@ cargo publish -p zerostyl-orbit        # depends on: zerostyl-circuits
 cargo publish -p zerostyl-sdk          # depends on: zerostyl-circuits, zerostyl-runtime
 ```
 
-Before publishing, convert the internal `path` dependencies to `path` + `version` so the published
-manifests point at crates.io (cargo uses the path locally and the version on crates.io):
+Each internal `path` dependency must carry a `version` alongside the path, so the published
+manifest resolves against crates.io (cargo uses the path locally and the version when published):
 
 ```toml
 zerostyl-circuits = { path = "../zerostyl-circuits", version = "0.1.0" }
 ```
 
-Path-only `dev-dependencies` (e.g. `zk_private_demo`) are dropped from the published package
+Path-only `dev-dependencies` (such as `zk_private_demo`) are omitted from the published package
 automatically.
 
-### Blocked (do not publish yet)
+### Crates not publishable to crates.io
 
 - **halo2-dependent crates** — `zerostyl-gadgets`, `zerostyl-compiler`, `zerostyl-verifier`,
   `zerostyl-cli`. The workspace pins `halo2_proofs` to the PSE fork via a `[patch.crates-io]` git
-  source. That patch does **not** travel with a published crate: the crate would declare
-  `halo2_proofs = "=0.3.0"`, which on crates.io is the *Zcash* upstream (IPA-Pasta) — a different
-  codebase — so downstream builds would fail. These stay git-only until the fork dependency is
-  resolved (switch to a crates.io-published KZG-BN254 fork, or vendor + rename the fork).
-- **example-path-dependent crates** — `zerostyl-exporter`, `zerostyl-debugger` depend on the demo
-  crates under `examples/` (which are `publish = false`). They stay git-only until the circuits are
-  factored out of `examples/`.
+  source. That patch does not travel with a published crate: the crate would declare
+  `halo2_proofs = "=0.3.0"`, which on crates.io is the Zcash upstream (IPA-Pasta) — a different
+  codebase — so downstream builds would fail. Publishing them requires either switching to a
+  crates.io-published KZG-BN254 fork or vendoring the fork under a distinct name.
+- **example-path-dependent crates** — `zerostyl-exporter` and `zerostyl-debugger` depend on the
+  demo crates under `examples/` (declared `publish = false`). Publishing them requires factoring
+  the circuits out of `examples/` into publishable crates.
 
-## npm / PyPI
+## npm and PyPI
 
-Independent of the crates.io blockers:
+The JavaScript and Python SDKs are independent of the crates.io constraints above:
 
-- **npm** — `pnpm --filter @zerostyl/sdk-ts build && npm publish` (from `packages/sdk-ts`).
-- **PyPI** — `python -m build && twine upload dist/*` (from `packages/sdk-py`).
+- **npm** — from `packages/sdk-ts`: `pnpm build && npm publish`.
+- **PyPI** — from `packages/sdk-py`: `python -m build && twine upload dist/*`.

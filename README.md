@@ -139,7 +139,7 @@ cargo fmt --all
 
 ## Adding your own circuit
 
-ZeroStyl is plug-in by design: implement the `CircuitDescriptor` trait, register it with one line, and the CLI, debugger, and (soon) ABI exporter all pick it up automatically. See [docs/EXTENDING.md](docs/EXTENDING.md) for the five-step recipe and [`examples/example_demo/`](examples/example_demo/) for the minimal template.
+ZeroStyl is plug-in by design: implement the `CircuitDescriptor` trait, register it with one line, and the CLI, debugger, and ABI exporter all pick it up automatically. See [docs/EXTENDING.md](docs/EXTENDING.md) for the five-step recipe and [`examples/example_demo/`](examples/example_demo/) for the minimal template.
 
 ---
 
@@ -151,7 +151,7 @@ Three SDKs consume the exporter's `abi.json`:
 - **TypeScript** — `@zerostyl/sdk-ts` (in [`packages/sdk-ts/`](packages/sdk-ts/)): turns `abi.json` into a typed TypeScript module your dApp can import.
 - **Python** — `zerostyl-sdk` (in [`packages/sdk-py/`](packages/sdk-py/)): typed dataclasses + bindings codegen, pure Python. See [`packages/sdk-py/README.md`](packages/sdk-py/README.md).
 
-None of the packages are published yet (crates.io / npm / PyPI) — use them from a clone of this monorepo for now:
+The packages are not published to crates.io / npm / PyPI — use them from a clone of this monorepo:
 
 ```bash
 # TypeScript
@@ -174,7 +174,7 @@ Proof generation from TS/Python (prover bindings) and on-chain submission helper
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — system design, proof system, size constraints.
 - [docs/EXTENDING.md](docs/EXTENDING.md) — add your own circuit (manual or `#[zk_private]`).
-- [docs/STARK_FEASIBILITY.md](docs/STARK_FEASIBILITY.md) — zk-STARKs feasibility: why halo2-KZG today, and when a post-quantum STARK backend would make sense.
+- [docs/STARK_FEASIBILITY.md](docs/STARK_FEASIBILITY.md) — zk-STARKs feasibility: why halo2-KZG is the current choice, and when a post-quantum STARK backend would make sense.
 - [contracts/CONTRACTS.md](contracts/CONTRACTS.md) — deployed contracts and the honest on-chain verification model.
 - [CHANGELOG.md](CHANGELOG.md) and [docs/RELEASING.md](docs/RELEASING.md) — versioning policy and release/publish process.
 
