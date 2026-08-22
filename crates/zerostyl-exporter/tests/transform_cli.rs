@@ -39,6 +39,8 @@ fn transform_contract_writes_four_artifacts_in_output_dir() {
             || transformed.contains("collateral_commitment: B256")
     );
     assert!(transformed.contains("proof : Bytes") || transformed.contains("proof: Bytes"));
+    assert!(transformed.contains("pub trait DepositHost"));
+    assert!(!transformed.contains("todo!"));
 
     let parsed: AbiSchema = serde_json::from_str(&abi).expect("abi.json is valid JSON");
     assert_eq!(parsed.circuit.name, "deposit");

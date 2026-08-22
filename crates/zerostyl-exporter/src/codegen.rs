@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
@@ -85,7 +87,13 @@ fn collect_chip_usage(attrs: &[ResolvedAttr]) -> ChipUsage {
             match b {
                 GadgetBinding::PoseidonCommit { .. } => u.poseidon = true,
                 GadgetBinding::Range { .. } => u.range = true,
-                GadgetBinding::Comparison { .. } => u.comparison = true,
+                GadgetBinding::Comparison { .. } => {
+                    u.comparison = true;
+                    // Comparison operands must be range-checked before asserting (assert_*
+                    // reduces to a range check on their difference, sound only for in-range
+                    // operands), so a standalone range chip is always required alongside it.
+                    u.range = true;
+                }
                 GadgetBinding::MerkleMember { .. } => u.merkle = true,
             }
         }
@@ -117,6 +125,28 @@ fn validate_merkle_pairing(attrs: &[ResolvedAttr]) -> Result<()> {
             return Err(ExporterError::Parse(format!(
                 "MerkleMember on '{}' requires a PoseidonCommit on the same param (the commitment becomes the leaf)",
                 attr.param_name
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Every `#[zk_private]` parameter must carry a `commit = "poseidon"` binding.
+///
+/// Without a commitment the value has no public anchor: the range/comparison statements would be
+/// about a witness tied to nothing observable on-chain, and the transformed contract would still
+/// expose a `{param}_commitment: B256` argument that binds no proof — a soundness footgun. The
+/// commitment is what ties the private value to a public input the verifier checks.
+fn validate_commit_present(attrs: &[ResolvedAttr]) -> Result<()> {
+    for attr in attrs {
+        let has_poseidon =
+            attr.bindings.iter().any(|b| matches!(b, GadgetBinding::PoseidonCommit { .. }));
+        if !has_poseidon {
+            return Err(ExporterError::Parse(format!(
+                "#[zk_private] parameter '{}' must include `commit = \"poseidon\"`: without a \
+                 commitment its constraints bind no public input and the transformed contract's \
+                 `{}_commitment` argument would be meaningless",
+                attr.param_name, attr.param_name
             )));
         }
     }
@@ -348,44 +378,96 @@ fn emit_synthesize_body(chips: &ChipUsage, attrs: &[ResolvedAttr]) -> Result<Tok
         });
     }
 
-    let mut instance_idx: usize = 0;
-
+    // --- Load pass ---
+    // Load each private value into a SINGLE canonical advice cell, then reuse that exact cell
+    // (each chip copy_advices it into its own region) across the commitment, range, and
+    // comparison gadgets. Loading a fresh cell per gadget would leave the range/comparison
+    // statements about free witnesses decoupled from the committed value — a soundness hole.
+    // Mirrors the hand-written state_mask circuit.
+    let mut loaded: BTreeSet<String> = BTreeSet::new();
     for attr in attrs {
-        let value_ident = format_ident!("{}", attr.param_name);
+        let param = &attr.param_name;
+        let value_cell = format_ident!("{}_value", param);
+        let value_field = format_ident!("{}", param);
+        let load_label = format!("load {param}");
+        // Load through whichever chip will constrain the value, so the canonical cell lives in
+        // an equality-enabled column; the other gadgets copy from it.
+        let loader = if attr_has_range(attr) {
+            quote! { range_chip.load_value(layouter.namespace(|| #load_label), self.#value_field)? }
+        } else if attr_has_comparison(attr) {
+            quote! {
+                comparison_chip.load_value(layouter.namespace(|| #load_label), self.#value_field)?
+            }
+        } else {
+            quote! {
+                poseidon_chip.load_private(layouter.namespace(|| #load_label), self.#value_field, 0)?
+            }
+        };
+        stmts.push(quote! { let #value_cell = #loader; });
+        loaded.insert(param.clone());
+
+        if let Some(nonce_var) = attr_poseidon_nonce(attr) {
+            let nonce_cell = format_ident!("{}_nonce_cell", param);
+            let nonce_field = format_ident!("{}", nonce_var);
+            let load_nonce_label = format!("load {nonce_var}");
+            stmts.push(quote! {
+                let #nonce_cell = poseidon_chip.load_private(
+                    layouter.namespace(|| #load_nonce_label),
+                    self.#nonce_field,
+                    1,
+                )?;
+            });
+        }
+    }
+    // Load any comparison right-hand-side operand that is not itself a loaded private value.
+    for attr in attrs {
+        for b in &attr.bindings {
+            if let GadgetBinding::Comparison { other, .. } = b {
+                if !is_simple_ident(other) {
+                    return Err(ExporterError::Parse(format!(
+                        "comparison RHS must currently be a simple identifier (other fn param); got '{other}'"
+                    )));
+                }
+                if loaded.insert(other.clone()) {
+                    let other_cell = format_ident!("{}_value", other);
+                    let other_field = format_ident!("{}", other);
+                    let load_label = format!("load {other}");
+                    stmts.push(quote! {
+                        let #other_cell = comparison_chip.load_value(
+                            layouter.namespace(|| #load_label),
+                            self.#other_field,
+                        )?;
+                    });
+                }
+            }
+        }
+    }
+
+    // --- Constrain pass ---
+    let mut instance_idx: usize = 0;
+    for attr in attrs {
         let mut sorted = attr.bindings.clone();
         sorted.sort_by_key(binding_priority);
         for b in &sorted {
             match b {
-                GadgetBinding::PoseidonCommit { nonce_var } => {
-                    stmts.extend(emit_poseidon(
-                        &attr.param_name,
-                        &value_ident,
-                        nonce_var,
-                        instance_idx,
-                    ));
+                GadgetBinding::PoseidonCommit { .. } => {
+                    stmts.extend(emit_poseidon(&attr.param_name, instance_idx));
                     instance_idx += 1;
                 }
                 GadgetBinding::Range { low, high, inclusive, num_bits } => {
-                    stmts.extend(emit_range(
-                        &attr.param_name,
-                        &value_ident,
-                        low,
-                        high,
-                        *inclusive,
-                        *num_bits,
-                    )?);
+                    stmts.extend(emit_range(&attr.param_name, low, high, *inclusive, *num_bits)?);
                 }
                 GadgetBinding::Comparison { op, other, num_bits } => {
-                    stmts.extend(emit_comparison(
-                        &attr.param_name,
-                        &value_ident,
-                        *op,
-                        other,
-                        *num_bits,
-                    )?);
+                    stmts.extend(emit_comparison(&attr.param_name, *op, other, *num_bits)?);
                 }
                 GadgetBinding::MerkleMember { siblings_var, indices_var, .. } => {
-                    stmts.extend(emit_merkle(&attr.param_name, siblings_var, indices_var)?);
+                    stmts.extend(emit_merkle(
+                        &attr.param_name,
+                        siblings_var,
+                        indices_var,
+                        instance_idx,
+                    )?);
+                    instance_idx += 1;
                 }
             }
         }
@@ -395,32 +477,31 @@ fn emit_synthesize_body(chips: &ChipUsage, attrs: &[ResolvedAttr]) -> Result<Tok
     Ok(quote! { #( #stmts )* })
 }
 
-fn emit_poseidon(
-    param_name: &str,
-    value_ident: &syn::Ident,
-    nonce_var: &str,
-    instance_idx: usize,
-) -> Vec<TokenStream> {
-    let nonce_ident = format_ident!("{}", nonce_var);
-    let value_cell = format_ident!("{}_poseidon_value", param_name);
-    let nonce_cell = format_ident!("{}_poseidon_nonce", param_name);
+fn attr_has_range(attr: &ResolvedAttr) -> bool {
+    attr.bindings.iter().any(|b| matches!(b, GadgetBinding::Range { .. }))
+}
+
+fn attr_has_comparison(attr: &ResolvedAttr) -> bool {
+    attr.bindings.iter().any(|b| matches!(b, GadgetBinding::Comparison { .. }))
+}
+
+fn attr_poseidon_nonce(attr: &ResolvedAttr) -> Option<&str> {
+    attr.bindings.iter().find_map(|b| match b {
+        GadgetBinding::PoseidonCommit { nonce_var } => Some(nonce_var.as_str()),
+        _ => None,
+    })
+}
+
+fn emit_poseidon(param_name: &str, instance_idx: usize) -> Vec<TokenStream> {
+    // Reuses the canonical `{param}_value` cell loaded in the load pass, so the commitment binds
+    // the same witness the range/comparison gadgets constrain.
+    let value_cell = format_ident!("{}_value", param_name);
+    let nonce_cell = format_ident!("{}_nonce_cell", param_name);
     let commitment = format_ident!("{}_commitment", param_name);
     let commitment_ref = format_ident!("{}_commitment_ref", param_name);
-    let load_value_label = format!("load {param_name} for poseidon");
-    let load_nonce_label = format!("load {nonce_var} for poseidon");
     let commit_label = format!("commit {param_name}");
     vec![
         quote! {
-            let #value_cell = poseidon_chip.load_private(
-                layouter.namespace(|| #load_value_label),
-                self.#value_ident,
-                0,
-            )?;
-            let #nonce_cell = poseidon_chip.load_private(
-                layouter.namespace(|| #load_nonce_label),
-                self.#nonce_ident,
-                1,
-            )?;
             let #commitment = poseidon_chip.commit(
                 layouter.namespace(|| #commit_label),
                 #value_cell.clone(),
@@ -436,14 +517,14 @@ fn emit_poseidon(
 
 fn emit_range(
     param_name: &str,
-    value_ident: &syn::Ident,
     low: &str,
     high: &str,
     inclusive: bool,
     num_bits: usize,
 ) -> Result<Vec<TokenStream>> {
-    let cell = format_ident!("{}_range_value", param_name);
-    let load_label = format!("load {param_name} for range");
+    // Reuses the canonical `{param}_value` cell; check_range_bounded copy_advices it, tying the
+    // range statement to the committed value.
+    let value_cell = format_ident!("{}_value", param_name);
     let check_label = format!("range check {param_name}");
     let low_expr: syn::Expr =
         syn::parse_str(low).map_err(|e| ExporterError::Parse(format!("range low '{low}': {e}")))?;
@@ -455,13 +536,9 @@ fn emit_range(
         quote! { Fr::from(((#high_expr) as u64) - 1) }
     };
     Ok(vec![quote! {
-        let #cell = range_chip.load_value(
-            layouter.namespace(|| #load_label),
-            self.#value_ident,
-        )?;
         range_chip.check_range_bounded(
             layouter.namespace(|| #check_label),
-            #cell,
+            #value_cell.clone(),
             Fr::from((#low_expr) as u64),
             #high_call,
             #num_bits,
@@ -471,58 +548,51 @@ fn emit_range(
 
 fn emit_comparison(
     param_name: &str,
-    value_ident: &syn::Ident,
     op: ComparisonOp,
     other: &str,
     num_bits: usize,
 ) -> Result<Vec<TokenStream>> {
-    let value_cell = format_ident!("{}_cmp_value", param_name);
-    let load_value_label = format!("load {param_name} for comparison");
-    let cmp_label = format!("{} {} {}", param_name, op_symbol(op), other);
-    let method = op_method(op)?;
-    let method_ident = format_ident!("{}", method);
-
-    let (load_other_stmts, other_cell_token) = if is_simple_ident(other) {
-        let other_ident = format_ident!("{}", other);
-        let other_cell = format_ident!("{}_cmp_value", other);
-        let load_other_label = format!("load {other} for comparison");
-        (
-            vec![quote! {
-                let #other_cell = comparison_chip.load_value(
-                    layouter.namespace(|| #load_other_label),
-                    self.#other_ident,
-                )?;
-            }],
-            quote! { #other_cell },
-        )
-    } else {
+    if !is_simple_ident(other) {
         return Err(ExporterError::Parse(format!(
             "comparison RHS must currently be a simple identifier (other fn param); got '{other}'"
         )));
-    };
-
-    let mut stmts = vec![quote! {
-        let #value_cell = comparison_chip.load_value(
-            layouter.namespace(|| #load_value_label),
-            self.#value_ident,
-        )?;
-    }];
-    stmts.extend(load_other_stmts);
-    stmts.push(quote! {
-        comparison_chip.#method_ident(
-            layouter.namespace(|| #cmp_label),
-            #value_cell,
-            #other_cell_token,
+    }
+    // Both operands are the canonical cells loaded in the load pass.
+    let value_cell = format_ident!("{}_value", param_name);
+    let other_cell = format_ident!("{}_value", other);
+    let method_ident = format_ident!("{}", op_method(op)?);
+    let cmp_label = format!("{} {} {}", param_name, op_symbol(op), other);
+    let lhs_range_label = format!("range check {param_name} (comparison operand)");
+    let rhs_range_label = format!("range check {other} (comparison operand)");
+    // assert_* reduces `a OP b` to a range check on their difference, which is only sound when
+    // both operands are already in [0, 2^num_bits) — otherwise a witness near the field modulus
+    // wraps and passes a comparison it should fail. Range-check both operands first (state_mask
+    // does the same). copy_advice inside check_range/assert_* ties these to the committed value.
+    Ok(vec![quote! {
+        range_chip.check_range(
+            layouter.namespace(|| #lhs_range_label),
+            #value_cell.clone(),
             #num_bits,
         )?;
-    });
-    Ok(stmts)
+        range_chip.check_range(
+            layouter.namespace(|| #rhs_range_label),
+            #other_cell.clone(),
+            #num_bits,
+        )?;
+        comparison_chip.#method_ident(
+            layouter.namespace(|| #cmp_label),
+            #value_cell.clone(),
+            #other_cell.clone(),
+            #num_bits,
+        )?;
+    }])
 }
 
 fn emit_merkle(
     param_name: &str,
     siblings_var: &str,
     indices_var: &str,
+    instance_idx: usize,
 ) -> Result<Vec<TokenStream>> {
     if !is_simple_ident(siblings_var) || !is_simple_ident(indices_var) {
         return Err(ExporterError::Parse(format!(
@@ -567,6 +637,11 @@ fn emit_merkle(
             &#siblings_cells,
             &#indices_cells,
         )?;
+        // Bind the root recomputed from the Merkle path to a public input. Without this the
+        // circuit only proves membership in *some* tree; pinning the computed root to a public
+        // instance forces it to equal the root the verifier supplies, so a wrong path (wrong
+        // siblings/indices) fails verification.
+        layouter.constrain_instance(#computed_root.cell(), config.instance, #instance_idx)?;
     }])
 }
 
@@ -613,7 +688,9 @@ pub fn emit_descriptor(circuit_name: &str, attrs: &[ResolvedAttr]) -> Result<Str
     let witness_fields_init = emit_witness_schema_fields(attrs)?;
     let public_inputs_init = emit_public_inputs_schema_fields(attrs);
     let num_witness = count_witness_fields(attrs);
-    let num_public = count_poseidon_commits(attrs);
+    // One public input per Poseidon commitment, plus one per Merkle membership (its computed
+    // root is exposed as a public instance — see emit_merkle).
+    let num_public = count_poseidon_commits(attrs) + count_merkle_members(attrs);
     let chips = collect_chip_usage(attrs);
 
     let witness_json_fields = emit_witness_json_fields(attrs);
@@ -922,61 +999,551 @@ pub fn emit_descriptor(circuit_name: &str, attrs: &[ResolvedAttr]) -> Result<Str
     Ok(tokens.to_string())
 }
 
-pub fn emit_transformed_contract(item_fn: &syn::ItemFn) -> Result<String> {
-    use syn::punctuated::Punctuated;
-    use syn::{parse_quote, FnArg};
+/// Return-value shape supported by the transformed entry point.
+enum TransformedRet {
+    Bool,
+    ResultBool,
+}
 
-    let mut transformed = item_fn.clone();
-    transformed.attrs.retain(|a| !a.path().is_ident("zk_private"));
+/// One `#[zk_private]` parameter after transformation.
+struct TransformedPrivate {
+    /// Original parameter name in the source function.
+    original: String,
+    /// On-chain commitment parameter name (`{original}_commitment`).
+    commitment: String,
+    /// Merkle root parameter name, when the param carries a `MerkleMember` binding.
+    root_var: Option<String>,
+    /// Whether the param carries a `PoseidonCommit` binding (drives the
+    /// nullifier/event flow — a commitment without one is not bound by the proof).
+    has_poseidon: bool,
+}
 
-    let mut new_inputs: Punctuated<FnArg, syn::Token![,]> = Punctuated::new();
-    let mut saw_private = false;
-    for input in transformed.sig.inputs.iter() {
-        match input {
-            FnArg::Typed(typed) => {
-                let is_zk = typed.attrs.iter().any(|a| a.path().is_ident("zk_private"));
-                let mut clean = typed.clone();
-                clean.attrs.retain(|a| !a.path().is_ident("zk_private"));
-                if is_zk {
-                    saw_private = true;
-                    let name = match clean.pat.as_ref() {
-                        syn::Pat::Ident(p) => p.ident.clone(),
-                        _ => {
-                            return Err(ExporterError::Parse(
-                                "transformed contract requires named identifier params on private inputs"
-                                    .into(),
-                            ));
-                        }
-                    };
-                    let commit_ident = format_ident!("{}_commitment", name);
-                    clean.pat = Box::new(parse_quote! { #commit_ident });
-                    clean.ty = Box::new(parse_quote! { B256 });
+/// Format bytes as a Rust array-literal body: `0x12, 0x34, …`.
+fn byte_array_literal(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("0x{b:02x}")).collect::<Vec<_>>().join(", ")
+}
+
+fn reserve_param_name(seen: &mut Vec<String>, name: &str) -> Result<()> {
+    if seen.iter().any(|n| n == name) {
+        return Err(ExporterError::Parse(format!(
+            "transformed contract parameter name collision: `{name}` (note: `host` and `proof` \
+             are reserved, and each merkle root variable becomes a parameter)"
+        )));
+    }
+    seen.push(name.to_string());
+    Ok(())
+}
+
+pub fn emit_transformed_contract(
+    circuit_name: &str,
+    item_fn: &syn::ItemFn,
+    attrs: &[ResolvedAttr],
+) -> Result<String> {
+    use std::collections::HashMap;
+    use std::fmt::Write as _;
+
+    // A transformed contract exposes each private param as its on-chain commitment, so every
+    // private param must actually carry one. (A commit-less private param is a valid off-chain
+    // circuit but cannot be represented on-chain.)
+    validate_commit_present(attrs)?;
+
+    let fn_name = item_fn.sig.ident.to_string();
+    let pascal = to_pascal_case(&fn_name);
+    let host_trait = format!("{pascal}Host");
+    let contract_struct = format!("{pascal}Contract");
+
+    // ── Return shape ────────────────────────────────────────────────────────
+    let ret = match &item_fn.sig.output {
+        syn::ReturnType::Default => {
+            return Err(ExporterError::Parse(
+                "transformed contract requires a `bool` or `Result<bool, Vec<u8>>` return type"
+                    .into(),
+            ));
+        }
+        syn::ReturnType::Type(_, ty) => {
+            let normalized = quote!(#ty).to_string().replace(' ', "");
+            match normalized.as_str() {
+                "bool" => TransformedRet::Bool,
+                "Result<bool,Vec<u8>>" => TransformedRet::ResultBool,
+                other => {
+                    return Err(ExporterError::Parse(format!(
+                        "unsupported return type `{other}` in transformed contract; \
+                         use `bool` or `Result<bool, Vec<u8>>`"
+                    )));
                 }
-                new_inputs.push(FnArg::Typed(clean));
             }
-            other => new_inputs.push(other.clone()),
+        }
+    };
+    let (ok_expr, fail_expr) = match ret {
+        TransformedRet::Bool => ("true", "false"),
+        TransformedRet::ResultBool => ("Ok(true)", "Ok(false)"),
+    };
+    let ret_str = {
+        let output = &item_fn.sig.output;
+        quote!(#output).to_string()
+    };
+
+    // ── Signature transformation ────────────────────────────────────────────
+    let by_name: HashMap<&str, &ResolvedAttr> =
+        attrs.iter().map(|a| (a.param_name.as_str(), a)).collect();
+
+    let mut sig_params: Vec<String> = Vec::new(); // without `host`/`proof`
+    let mut wrapper_params: Vec<String> = Vec::new(); // for the Stylus module
+    let mut call_args: Vec<String> = Vec::new();
+    let mut seen_names: Vec<String> = vec!["host".to_string(), "proof".to_string()];
+    let mut privates: Vec<TransformedPrivate> = Vec::new();
+
+    for input in item_fn.sig.inputs.iter() {
+        let typed = match input {
+            syn::FnArg::Typed(t) => t,
+            syn::FnArg::Receiver(_) => {
+                return Err(ExporterError::Parse(
+                    "transformed contract does not support `self` receivers".into(),
+                ));
+            }
+        };
+        let is_zk = typed.attrs.iter().any(|a| a.path().is_ident("zk_private"));
+        if is_zk {
+            let name = match typed.pat.as_ref() {
+                syn::Pat::Ident(p) => p.ident.to_string(),
+                _ => {
+                    return Err(ExporterError::Parse(
+                        "transformed contract requires named identifier params on private inputs"
+                            .into(),
+                    ));
+                }
+            };
+            let commitment = format!("{name}_commitment");
+            let attr = by_name.get(name.as_str());
+            let has_poseidon = attr.is_some_and(|a| {
+                a.bindings.iter().any(|b| matches!(b, GadgetBinding::PoseidonCommit { .. }))
+            });
+            let root_var = attr.and_then(|a| {
+                a.bindings.iter().find_map(|b| match b {
+                    GadgetBinding::MerkleMember { root_var, .. } => Some(root_var.clone()),
+                    _ => None,
+                })
+            });
+            reserve_param_name(&mut seen_names, &commitment)?;
+            sig_params.push(format!("{commitment}: B256"));
+            wrapper_params.push(format!("{commitment}: B256"));
+            call_args.push(commitment.clone());
+            if let Some(root) = &root_var {
+                reserve_param_name(&mut seen_names, root)?;
+                sig_params.push(format!("{root}: B256"));
+                wrapper_params.push(format!("{root}: B256"));
+                call_args.push(root.clone());
+            }
+            privates.push(TransformedPrivate {
+                original: name,
+                commitment,
+                root_var,
+                has_poseidon,
+            });
+        } else {
+            let pat = &typed.pat;
+            let ty = &typed.ty;
+            let name = quote!(#pat).to_string();
+            let ty_str = quote!(#ty).to_string();
+            reserve_param_name(&mut seen_names, &name)?;
+            sig_params.push(format!("{name}: {ty_str}"));
+            wrapper_params.push(format!("{name}: {ty_str}"));
+            call_args.push(name);
         }
     }
 
-    if !saw_private {
+    if privates.is_empty() {
         return Err(ExporterError::Parse(
             "emit_transformed_contract: no #[zk_private] param found; nothing to transform".into(),
         ));
     }
 
-    new_inputs.push(parse_quote! { proof: Bytes });
-    transformed.sig.inputs = new_inputs;
-    *transformed.block = parse_quote! { { todo!() } };
+    // ── Public inputs (instance order) + attestation docs ───────────────────
+    // Mirrors emit_synthesize_body: per attr, bindings sorted by priority; only
+    // Poseidon commitments and Merkle roots contribute instance values.
+    let mut public_input_names: Vec<String> = Vec::new();
+    let mut attestations: Vec<String> = Vec::new();
+    for attr in attrs {
+        let mut bindings = attr.bindings.clone();
+        bindings.sort_by_key(binding_priority);
+        for binding in &bindings {
+            match binding {
+                GadgetBinding::PoseidonCommit { nonce_var } => {
+                    let idx = public_input_names.len();
+                    public_input_names.push(format!("{}_commitment", attr.param_name));
+                    attestations.push(format!(
+                        "- `{p}_commitment` = Poseidon({p}, {nonce}) — public input {idx}",
+                        p = attr.param_name,
+                        nonce = nonce_var,
+                    ));
+                }
+                GadgetBinding::Range { low, high, inclusive, .. } => {
+                    let dots = if *inclusive { "..=" } else { ".." };
+                    attestations.push(format!("- `{}` ∈ {low}{dots}{high}", attr.param_name));
+                }
+                GadgetBinding::Comparison { op, other, .. } => {
+                    attestations.push(format!(
+                        "- `{p}` {sym} `{other}` — `{other}` is bound as a *private witness*; \
+                         the proof does NOT tie it to any on-chain parameter of the same name",
+                        p = attr.param_name,
+                        sym = op_symbol(*op),
+                    ));
+                }
+                GadgetBinding::MerkleMember { root_var, depth, .. } => {
+                    let idx = public_input_names.len();
+                    public_input_names.push(root_var.clone());
+                    attestations.push(format!(
+                        "- `{p}_commitment` is a leaf of the Merkle tree rooted at `{root_var}` \
+                         (depth {depth}) — public input {idx}",
+                        p = attr.param_name,
+                    ));
+                }
+            }
+        }
+    }
 
-    let tokens = quote! {
-        #![allow(clippy::all, dead_code, unused_variables)]
+    // ── Generation-time constants from zerostyl-runtime ─────────────────────
+    let signature = zerostyl_runtime::ZeroStylPrivacyTransaction::SIGNATURE;
+    let topic0 = byte_array_literal(&zerostyl_runtime::ZeroStylPrivacyTransaction::topic0());
+    let circuit_id = byte_array_literal(
+        zerostyl_runtime::BytecodeFingerprint::of(circuit_name.as_bytes()).as_bytes(),
+    );
 
-        use alloy_primitives::{B256, Bytes};
+    // ── File assembly ───────────────────────────────────────────────────────
+    let mut out = String::new();
+    let w = &mut out;
 
-        #transformed
+    writeln!(w, "#![allow(dead_code, unused_variables, unexpected_cfgs)]").unwrap();
+    writeln!(w, "//! Privacy-transformed ABI for the `{circuit_name}` circuit.").unwrap();
+    writeln!(w, "//!").unwrap();
+    writeln!(w, "//! Each `#[zk_private]` parameter of the source function is replaced by its")
+        .unwrap();
+    writeln!(w, "//! commitment (`B256`), and a trailing `proof: Bytes` carries the halo2 KZG")
+        .unwrap();
+    writeln!(w, "//! proof. The proof attests, without revealing the private values (see").unwrap();
+    writeln!(w, "//! `circuit.rs`):").unwrap();
+    writeln!(w, "//!").unwrap();
+    for line in &attestations {
+        writeln!(w, "//! {line}").unwrap();
+    }
+    writeln!(w, "//!").unwrap();
+    writeln!(w, "//! Public inputs are 32-byte **little-endian** field representations").unwrap();
+    writeln!(w, "//! (`Fr::to_repr()`), in the order listed above.").unwrap();
+    writeln!(w, "//!").unwrap();
+    writeln!(w, "//! # Verification model").unwrap();
+    writeln!(w, "//!").unwrap();
+    writeln!(w, "//! Proofs are NOT cryptographically verified on-chain: Arbitrum Stylus caps")
+        .unwrap();
+    writeln!(
+        w,
+        "//! deployable contracts at 24 KB Brotli-compressed, while the halo2 KZG verifier"
+    )
+    .unwrap();
+    writeln!(w, "//! alone exceeds 90 KB. This module implements a hash-guard flow instead —")
+        .unwrap();
+    writeln!(w, "//! keccak256 proof hash, one-shot nullifier registry, standardized").unwrap();
+    writeln!(
+        w,
+        "//! `ZeroStylPrivacyTransaction` event — and exposes [`{host_trait}::verify_proof`]"
+    )
+    .unwrap();
+    writeln!(w, "//! as the hook where real verification plugs in (host-side via").unwrap();
+    writeln!(w, "//! `zerostyl-verifier`, or on-chain once a verifier fits the size budget).")
+        .unwrap();
+    writeln!(w).unwrap();
+    writeln!(w, "use alloy_primitives::{{keccak256, B256, Bytes}};").unwrap();
+    writeln!(w).unwrap();
+    writeln!(w, "/// Canonical privacy-transaction event signature").unwrap();
+    writeln!(w, "/// (`zerostyl_runtime::ZeroStylPrivacyTransaction::SIGNATURE`).").unwrap();
+    writeln!(w, "pub const ZEROSTYL_PRIVACY_TX_SIGNATURE: &str = \"{signature}\";").unwrap();
+    writeln!(w).unwrap();
+    writeln!(w, "/// keccak256 of [`ZEROSTYL_PRIVACY_TX_SIGNATURE`] — the EVM log topic0 that")
+        .unwrap();
+    writeln!(w, "/// indexers filter on. Precomputed at generation time.").unwrap();
+    writeln!(w, "pub const ZEROSTYL_PRIVACY_TX_TOPIC0: [u8; 32] = [{topic0}];").unwrap();
+    writeln!(w).unwrap();
+    writeln!(
+        w,
+        "/// keccak256 of the circuit name `\"{circuit_name}\"` — identifies which circuit"
+    )
+    .unwrap();
+    writeln!(w, "/// produced a proof (`zerostyl_runtime::BytecodeFingerprint`). Production")
+        .unwrap();
+    writeln!(w, "/// deployments should fingerprint the deployed verifier bytecode instead of the")
+        .unwrap();
+    writeln!(w, "/// name.").unwrap();
+    writeln!(w, "pub const CIRCUIT_ID: [u8; 32] = [{circuit_id}];").unwrap();
+    writeln!(w).unwrap();
+    writeln!(w, "const NULLIFIER_DOMAIN: [u8; 21] = *b\"zerostyl.nullifier.v1\";").unwrap();
+    writeln!(w).unwrap();
+    writeln!(w, "/// Mirror of `zerostyl_runtime::events::ZeroStylPrivacyTransaction`.").unwrap();
+    writeln!(w, "#[derive(Debug, Clone, Copy, PartialEq, Eq)]").unwrap();
+    writeln!(w, "pub struct PrivacyTransactionRecord {{").unwrap();
+    writeln!(w, "    pub circuit: B256,").unwrap();
+    writeln!(w, "    pub nullifier: B256,").unwrap();
+    writeln!(w, "    pub commitment: B256,").unwrap();
+    writeln!(w, "    pub merkle_root: B256,").unwrap();
+    writeln!(w, "    pub proof_hash: B256,").unwrap();
+    writeln!(w, "    pub timestamp: u64,").unwrap();
+    writeln!(w, "}}").unwrap();
+    writeln!(w).unwrap();
+    writeln!(w, "/// Hooks the embedding contract provides: nullifier storage, clock, event sink,")
+        .unwrap();
+    writeln!(w, "/// and the proof-verification hook.").unwrap();
+    writeln!(w, "pub trait {host_trait} {{").unwrap();
+    writeln!(w, "    /// Whether `nullifier` was already consumed by an accepted submission.")
+        .unwrap();
+    writeln!(w, "    fn is_nullifier_used(&self, nullifier: B256) -> bool;").unwrap();
+    writeln!(w, "    /// Persist `nullifier` as consumed.").unwrap();
+    writeln!(w, "    fn mark_nullifier_used(&mut self, nullifier: B256);").unwrap();
+    writeln!(w, "    /// Current block timestamp, in seconds.").unwrap();
+    writeln!(w, "    fn block_timestamp(&self) -> u64;").unwrap();
+    writeln!(w, "    /// Emit the standardized privacy-transaction event").unwrap();
+    writeln!(w, "    /// (topic0 = [`ZEROSTYL_PRIVACY_TX_TOPIC0`]).").unwrap();
+    writeln!(w, "    fn emit_privacy_transaction(&mut self, record: &PrivacyTransactionRecord);")
+        .unwrap();
+    writeln!(w, "    /// Proof-verification hook. `public_inputs` are 32-byte little-endian field")
+        .unwrap();
+    writeln!(w, "    /// representations in circuit order.").unwrap();
+    writeln!(w, "    ///").unwrap();
+    writeln!(w, "    /// Fails closed by default: returns `false` so an unconfigured contract")
+        .unwrap();
+    writeln!(w, "    /// rejects every submission rather than accepting unverified proofs. You")
+        .unwrap();
+    writeln!(w, "    /// MUST override this to call a real verifier (e.g. `zerostyl-verifier`)")
+        .unwrap();
+    writeln!(w, "    /// before the contract accepts anything.").unwrap();
+    writeln!(w, "    fn verify_proof(&self, proof: &[u8], public_inputs: &[[u8; 32]]) -> bool {{")
+        .unwrap();
+    writeln!(w, "        let _ = (proof, public_inputs);").unwrap();
+    writeln!(w, "        false").unwrap();
+    writeln!(w, "    }}").unwrap();
+    writeln!(w, "}}").unwrap();
+    writeln!(w).unwrap();
+
+    // public_inputs()
+    let pi_doc = if public_input_names.is_empty() {
+        "This circuit exposes no public inputs.".to_string()
+    } else {
+        format!(
+            "Public inputs in circuit order: {}.",
+            public_input_names
+                .iter()
+                .enumerate()
+                .map(|(i, n)| format!("`[{i}]` = `{n}`"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
     };
+    let pi_params =
+        public_input_names.iter().map(|n| format!("{n}: B256")).collect::<Vec<_>>().join(", ");
+    let pi_exprs =
+        public_input_names.iter().map(|n| format!("{n}.0")).collect::<Vec<_>>().join(", ");
+    writeln!(w, "/// {pi_doc}").unwrap();
+    writeln!(w, "/// Values are forwarded as 32-byte little-endian field representations.")
+        .unwrap();
+    writeln!(w, "pub fn public_inputs({pi_params}) -> [[u8; 32]; {}] {{", public_input_names.len())
+        .unwrap();
+    writeln!(w, "    [{pi_exprs}]").unwrap();
+    writeln!(w, "}}").unwrap();
+    writeln!(w).unwrap();
+    writeln!(w, "/// Per-commitment idempotence key: `keccak256(NULLIFIER_DOMAIN ‖ commitment)`.")
+        .unwrap();
+    writeln!(w, "///").unwrap();
+    writeln!(w, "/// Derived from the commitment ALONE (not the proof bytes), so a commitment can")
+        .unwrap();
+    writeln!(w, "/// be accepted only once — re-proving the same statement yields a fresh,")
+        .unwrap();
+    writeln!(w, "/// transcript-randomized proof but the same key, and the replay guard still")
+        .unwrap();
+    writeln!(w, "/// fires. This matches the contracts/state_mask_verifier model. It is a replay")
+        .unwrap();
+    writeln!(w, "/// guard over public data, NOT an unlinkable nullifier — a production circuit")
+        .unwrap();
+    writeln!(w, "/// should expose a real nullifier as a dedicated public input.").unwrap();
+    writeln!(w, "pub fn derive_nullifier(commitment: B256) -> B256 {{").unwrap();
+    writeln!(w, "    let mut buf = [0u8; 21 + 32];").unwrap();
+    writeln!(w, "    buf[..21].copy_from_slice(&NULLIFIER_DOMAIN);").unwrap();
+    writeln!(w, "    buf[21..].copy_from_slice(commitment.as_slice());").unwrap();
+    writeln!(w, "    keccak256(buf)").unwrap();
+    writeln!(w, "}}").unwrap();
+    writeln!(w).unwrap();
 
-    Ok(tokens.to_string())
+    // The transformed entry point.
+    let vis = {
+        let v = &item_fn.vis;
+        let s = quote!(#v).to_string();
+        if s.is_empty() {
+            s
+        } else {
+            format!("{s} ")
+        }
+    };
+    let poseidon_params: Vec<&TransformedPrivate> =
+        privates.iter().filter(|p| p.has_poseidon).collect();
+    writeln!(w, "/// Privacy-transformed entry point for `{fn_name}`.").unwrap();
+    writeln!(w, "///").unwrap();
+    writeln!(w, "/// All guards run before any state change: empty proof, zero commitment, the")
+        .unwrap();
+    writeln!(w, "/// [`{host_trait}::verify_proof`] hook, and nullifier replay are rejected")
+        .unwrap();
+    writeln!(w, "/// atomically. On acceptance every nullifier is marked used and one record per")
+        .unwrap();
+    writeln!(w, "/// private parameter is emitted.").unwrap();
+    writeln!(
+        w,
+        "{vis}fn {fn_name}(host: &mut impl {host_trait}, {} proof: Bytes) {ret_str} {{",
+        if sig_params.is_empty() { String::new() } else { format!("{}, ", sig_params.join(", ")) }
+    )
+    .unwrap();
+    writeln!(w, "    if proof.is_empty() {{").unwrap();
+    writeln!(w, "        return {fail_expr};").unwrap();
+    writeln!(w, "    }}").unwrap();
+    for p in &privates {
+        writeln!(w, "    if {} == B256::ZERO {{", p.commitment).unwrap();
+        writeln!(w, "        return {fail_expr};").unwrap();
+        writeln!(w, "    }}").unwrap();
+    }
+    writeln!(
+        w,
+        "    if !host.verify_proof(&proof, &public_inputs({})) {{",
+        public_input_names.join(", ")
+    )
+    .unwrap();
+    writeln!(w, "        return {fail_expr};").unwrap();
+    writeln!(w, "    }}").unwrap();
+    if !poseidon_params.is_empty() {
+        writeln!(w, "    let proof_hash = keccak256(&proof);").unwrap();
+        for p in &poseidon_params {
+            writeln!(w, "    let {}_nullifier = derive_nullifier({});", p.original, p.commitment)
+                .unwrap();
+        }
+        for p in &poseidon_params {
+            writeln!(w, "    if host.is_nullifier_used({}_nullifier) {{", p.original).unwrap();
+            writeln!(w, "        return {fail_expr};").unwrap();
+            writeln!(w, "    }}").unwrap();
+        }
+        for p in &poseidon_params {
+            writeln!(w, "    host.mark_nullifier_used({}_nullifier);", p.original).unwrap();
+        }
+        writeln!(w, "    let timestamp = host.block_timestamp();").unwrap();
+        for p in &poseidon_params {
+            let merkle_root = match &p.root_var {
+                Some(root) => root.clone(),
+                None => "B256::ZERO".to_string(),
+            };
+            writeln!(w, "    host.emit_privacy_transaction(&PrivacyTransactionRecord {{").unwrap();
+            writeln!(w, "        circuit: B256::new(CIRCUIT_ID),").unwrap();
+            writeln!(w, "        nullifier: {}_nullifier,", p.original).unwrap();
+            writeln!(w, "        commitment: {},", p.commitment).unwrap();
+            writeln!(w, "        merkle_root: {merkle_root},").unwrap();
+            writeln!(w, "        proof_hash,").unwrap();
+            writeln!(w, "        timestamp,").unwrap();
+            writeln!(w, "    }});").unwrap();
+        }
+    }
+    writeln!(w, "    {ok_expr}").unwrap();
+    writeln!(w, "}}").unwrap();
+    writeln!(w).unwrap();
+
+    // Reference Stylus embedding (parse-checked only; the feature is never enabled).
+    writeln!(w, "/// Reference Stylus embedding — copy into a dedicated contract crate.").unwrap();
+    writeln!(w, "///").unwrap();
+    writeln!(w, "/// Gated behind a feature this workspace never enables: `stylus-sdk` only")
+        .unwrap();
+    writeln!(w, "/// compiles for the Stylus WASM target. The module is parse-checked and")
+        .unwrap();
+    writeln!(w, "/// snapshot-locked, not type-checked. To deploy it, create a contract crate")
+        .unwrap();
+    writeln!(
+        w,
+        "/// (stylus-sdk = \"0.9.0\", alloy-primitives = \"=0.8.20\"; see `contracts/` for"
+    )
+    .unwrap();
+    writeln!(w, "/// the layout) and move this module there.").unwrap();
+    writeln!(w, "#[cfg(feature = \"zerostyl-stylus-contract\")]").unwrap();
+    writeln!(w, "pub mod stylus_contract {{").unwrap();
+    writeln!(w, "    use super::*;").unwrap();
+    writeln!(
+        w,
+        "    use stylus_sdk::{{alloy_primitives::U256, alloy_sol_types::sol, evm, prelude::*}};"
+    )
+    .unwrap();
+    writeln!(w).unwrap();
+    writeln!(w, "    sol! {{").unwrap();
+    writeln!(w, "        /// Standardized privacy-transaction event; signature matches").unwrap();
+    writeln!(w, "        /// [`ZEROSTYL_PRIVACY_TX_SIGNATURE`].").unwrap();
+    writeln!(w, "        event ZeroStylPrivacyTransaction(").unwrap();
+    writeln!(w, "            bytes32 indexed circuit,").unwrap();
+    writeln!(w, "            bytes32 indexed nullifier,").unwrap();
+    writeln!(w, "            bytes32 indexed commitment,").unwrap();
+    writeln!(w, "            bytes32 merkle_root,").unwrap();
+    writeln!(w, "            bytes32 proof_hash,").unwrap();
+    writeln!(w, "            uint256 timestamp").unwrap();
+    writeln!(w, "        );").unwrap();
+    writeln!(w, "    }}").unwrap();
+    writeln!(w).unwrap();
+    writeln!(w, "    sol_storage! {{").unwrap();
+    writeln!(w, "        #[entrypoint]").unwrap();
+    writeln!(w, "        pub struct {contract_struct} {{").unwrap();
+    writeln!(w, "            /// One-shot nullifier registry.").unwrap();
+    writeln!(w, "            mapping(bytes32 => bool) used_nullifiers;").unwrap();
+    writeln!(w, "        }}").unwrap();
+    writeln!(w, "    }}").unwrap();
+    writeln!(w).unwrap();
+    writeln!(w, "    impl super::{host_trait} for {contract_struct} {{").unwrap();
+    writeln!(w, "        fn is_nullifier_used(&self, nullifier: B256) -> bool {{").unwrap();
+    writeln!(w, "            self.used_nullifiers.get(nullifier)").unwrap();
+    writeln!(w, "        }}").unwrap();
+    writeln!(w).unwrap();
+    writeln!(w, "        fn mark_nullifier_used(&mut self, nullifier: B256) {{").unwrap();
+    writeln!(w, "            self.used_nullifiers.setter(nullifier).set(true);").unwrap();
+    writeln!(w, "        }}").unwrap();
+    writeln!(w).unwrap();
+    writeln!(w, "        fn block_timestamp(&self) -> u64 {{").unwrap();
+    writeln!(w, "            self.vm().block_timestamp()").unwrap();
+    writeln!(w, "        }}").unwrap();
+    writeln!(w).unwrap();
+    writeln!(
+        w,
+        "        fn emit_privacy_transaction(&mut self, record: &PrivacyTransactionRecord) {{"
+    )
+    .unwrap();
+    writeln!(w, "            #[allow(deprecated)]").unwrap();
+    writeln!(w, "            evm::log(ZeroStylPrivacyTransaction {{").unwrap();
+    writeln!(w, "                circuit: record.circuit,").unwrap();
+    writeln!(w, "                nullifier: record.nullifier,").unwrap();
+    writeln!(w, "                commitment: record.commitment,").unwrap();
+    writeln!(w, "                merkle_root: record.merkle_root,").unwrap();
+    writeln!(w, "                proof_hash: record.proof_hash,").unwrap();
+    writeln!(w, "                timestamp: U256::from(record.timestamp),").unwrap();
+    writeln!(w, "            }});").unwrap();
+    writeln!(w, "        }}").unwrap();
+    writeln!(w, "    }}").unwrap();
+    writeln!(w).unwrap();
+    writeln!(w, "    #[public]").unwrap();
+    writeln!(w, "    impl {contract_struct} {{").unwrap();
+    writeln!(
+        w,
+        "        pub fn {fn_name}(&mut self, {} proof: stylus_sdk::abi::Bytes) {ret_str} {{",
+        if wrapper_params.is_empty() {
+            String::new()
+        } else {
+            format!("{}, ", wrapper_params.join(", "))
+        }
+    )
+    .unwrap();
+    writeln!(
+        w,
+        "            super::{fn_name}(self, {} proof.0.into())",
+        if call_args.is_empty() { String::new() } else { format!("{}, ", call_args.join(", ")) }
+    )
+    .unwrap();
+    writeln!(w, "        }}").unwrap();
+    writeln!(w, "    }}").unwrap();
+    writeln!(w, "}}").unwrap();
+
+    Ok(out)
 }
 
 fn emit_witness_json_fields(attrs: &[ResolvedAttr]) -> Vec<TokenStream> {
@@ -1072,7 +1639,11 @@ fn emit_build_inputs_body(attrs: &[ResolvedAttr], circuit_ident: &syn::Ident) ->
 
     for attr in attrs {
         push_scalar(&attr.param_name, &mut seen, &mut scalar_parses, &mut circuit_inits);
-        for b in &attr.bindings {
+        // Iterate bindings in the same priority order as `emit_synthesize_body` so the public
+        // input terms line up with the `constrain_instance` indices emitted there.
+        let mut sorted = attr.bindings.clone();
+        sorted.sort_by_key(binding_priority);
+        for b in &sorted {
             match b {
                 GadgetBinding::PoseidonCommit { nonce_var } => {
                     push_scalar(nonce_var, &mut seen, &mut scalar_parses, &mut circuit_inits);
@@ -1096,6 +1667,9 @@ fn emit_build_inputs_body(attrs: &[ResolvedAttr], circuit_ident: &syn::Ident) ->
                     push_scalar(root_var, &mut seen, &mut scalar_parses, &mut circuit_inits);
                     push_vec(siblings_var, &mut seen, &mut vec_parses, &mut circuit_inits);
                     push_vec(indices_var, &mut seen, &mut vec_parses, &mut circuit_inits);
+                    // The recomputed Merkle root is a public input (see emit_merkle).
+                    let root_ident = format_ident!("{}", root_var);
+                    public_input_terms.push(quote! { #root_ident });
                 }
                 GadgetBinding::Range { .. } => {}
             }
@@ -1151,6 +1725,14 @@ fn count_poseidon_commits(attrs: &[ResolvedAttr]) -> usize {
         .iter()
         .flat_map(|a| a.bindings.iter())
         .filter(|b| matches!(b, GadgetBinding::PoseidonCommit { .. }))
+        .count()
+}
+
+fn count_merkle_members(attrs: &[ResolvedAttr]) -> usize {
+    attrs
+        .iter()
+        .flat_map(|a| a.bindings.iter())
+        .filter(|b| matches!(b, GadgetBinding::MerkleMember { .. }))
         .count()
 }
 
@@ -1259,16 +1841,32 @@ fn emit_witness_schema_fields(attrs: &[ResolvedAttr]) -> Result<Vec<TokenStream>
 fn emit_public_inputs_schema_fields(attrs: &[ResolvedAttr]) -> Vec<TokenStream> {
     let mut out = Vec::new();
     for attr in attrs {
-        for b in &attr.bindings {
-            if matches!(b, GadgetBinding::PoseidonCommit { .. }) {
-                let name = format!("{}_commitment", attr.param_name);
-                out.push(quote! {
-                    PublicInputField {
-                        name: #name.into(),
-                        kind: FieldType::Fp,
-                        description: None,
-                    }
-                });
+        // Emit in the same priority order as the instance bindings in emit_synthesize_body.
+        let mut sorted = attr.bindings.clone();
+        sorted.sort_by_key(binding_priority);
+        for b in &sorted {
+            match b {
+                GadgetBinding::PoseidonCommit { .. } => {
+                    let name = format!("{}_commitment", attr.param_name);
+                    out.push(quote! {
+                        PublicInputField {
+                            name: #name.into(),
+                            kind: FieldType::Fp,
+                            description: None,
+                        }
+                    });
+                }
+                GadgetBinding::MerkleMember { root_var, .. } => {
+                    let name = root_var.clone();
+                    out.push(quote! {
+                        PublicInputField {
+                            name: #name.into(),
+                            kind: FieldType::Fp,
+                            description: None,
+                        }
+                    });
+                }
+                _ => {}
             }
         }
     }
@@ -1428,6 +2026,46 @@ mod tests {
         assert!(src.contains("RangeProofChip"));
         assert!(src.contains("ComparisonChip"));
         assert!(src.contains("DepositCircuit"));
+    }
+
+    /// Soundness lock: a param carrying commitment + range + comparison must be loaded into a
+    /// SINGLE canonical cell that all gadgets reuse (copy_advice ties them together). Loading a
+    /// fresh cell per gadget would leave the range/comparison about free witnesses decoupled from
+    /// the committed value — forgeable. See emit_synthesize_body.
+    #[test]
+    fn multi_gadget_composition_binds_one_cell_per_value() {
+        let attrs = vec![resolved(
+            "collateral",
+            "u64",
+            vec![
+                AttrSpec::Commit(CommitScheme::Poseidon),
+                AttrSpec::Range(RangeSpec {
+                    low: "0".into(),
+                    high: "1000".into(),
+                    inclusive: false,
+                }),
+                AttrSpec::Constraint(Constraint::Gte("threshold".into())),
+            ],
+        )];
+        let src = emit_circuit("deposit", &attrs).unwrap();
+        parse_as_file(&src);
+        // The value is loaded exactly once (not once per gadget) …
+        assert_eq!(
+            src.matches("self . collateral)").count() + src.matches("self.collateral)").count(),
+            1,
+            "collateral must be loaded into a single cell, not reloaded per gadget"
+        );
+        // … and the old per-gadget decoupled cell names must be gone.
+        assert!(!src.contains("collateral_range_value"));
+        assert!(!src.contains("collateral_cmp_value"));
+        assert!(!src.contains("collateral_poseidon_value"));
+        // The canonical cell is reused (cloned) across gadgets.
+        assert!(
+            src.contains("collateral_value . clone ()") || src.contains("collateral_value.clone()")
+        );
+        // Comparison operands are range-checked before the assertion (wraparound guard).
+        assert!(src.contains("comparison operand"));
+        assert!(src.contains("assert_gte"));
     }
 
     #[test]
@@ -1710,6 +2348,24 @@ mod tests {
         syn::parse_str(src).unwrap_or_else(|e| panic!("fn source does not parse: {e}\n{src}"))
     }
 
+    /// Resolve the fn's own `#[zk_private]` attrs and emit, naming the circuit
+    /// after the fn — mirrors the `transform_contract` pipeline.
+    fn emit_transformed(item_fn: &syn::ItemFn) -> Result<String> {
+        let attrs = crate::parser::parse_fn(item_fn)?;
+        let resolved = crate::resolver::resolve_all(&attrs)?;
+        emit_transformed_contract(&item_fn.sig.ident.to_string(), item_fn, &resolved)
+    }
+
+    fn find_fn(file: syn::File, name: &str) -> syn::ItemFn {
+        file.items
+            .into_iter()
+            .find_map(|i| match i {
+                syn::Item::Fn(f) if f.sig.ident == name => Some(f),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("fn `{name}` present in generated file"))
+    }
+
     #[test]
     fn transformed_contract_replaces_private_param_with_commitment() {
         let item_fn = parse_fn_source(
@@ -1723,14 +2379,16 @@ mod tests {
             }
             "#,
         );
-        let src = emit_transformed_contract(&item_fn).unwrap();
+        let src = emit_transformed(&item_fn).unwrap();
         parse_as_file(&src);
-        assert!(src.contains("amount : U256"));
-        assert!(src.contains("collateral_commitment : B256"));
-        assert!(src.contains("threshold : U256"));
-        assert!(src.contains("proof : Bytes"));
-        assert!(!src.contains("zk_private"));
-        assert!(src.contains("todo ! ()") || src.contains("todo!()"));
+        assert!(src.contains("amount: U256"));
+        assert!(src.contains("collateral_commitment: B256"));
+        assert!(src.contains("threshold: U256"));
+        assert!(src.contains("proof: Bytes"));
+        assert!(src.contains("host: &mut impl DepositHost"));
+        // The attribute itself must be stripped (the docs may mention it).
+        assert!(!src.contains("#[zk_private("));
+        assert!(!src.contains("todo!"));
     }
 
     #[test]
@@ -1740,8 +2398,8 @@ mod tests {
             pub fn f(#[zk_private(commit = "poseidon")] x: u64) -> bool { true }
             "#,
         );
-        let src = emit_transformed_contract(&item_fn).unwrap();
-        assert!(src.contains("use alloy_primitives :: { B256 , Bytes }"));
+        let src = emit_transformed(&item_fn).unwrap();
+        assert!(src.contains("use alloy_primitives::{keccak256, B256, Bytes};"));
     }
 
     #[test]
@@ -1757,13 +2415,8 @@ mod tests {
             ) -> bool { true }
             "#,
         );
-        let src = emit_transformed_contract(&item_fn).unwrap();
-        let file = parse_as_file(&src);
-        let f = file
-            .items
-            .into_iter()
-            .find_map(|i| if let syn::Item::Fn(f) = i { Some(f) } else { None })
-            .expect("fn present");
+        let src = emit_transformed(&item_fn).unwrap();
+        let f = find_fn(parse_as_file(&src), "order");
         let names: Vec<String> = f
             .sig
             .inputs
@@ -1776,13 +2429,13 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(names, vec!["a", "b_commitment", "c", "d_commitment", "e", "proof"]);
+        assert_eq!(names, vec!["host", "a", "b_commitment", "c", "d_commitment", "e", "proof"]);
     }
 
     #[test]
     fn transformed_contract_rejects_fn_without_private_params() {
         let item_fn = parse_fn_source(r#"pub fn plain(x: u64) -> bool { true }"#);
-        let err = emit_transformed_contract(&item_fn).unwrap_err();
+        let err = emit_transformed(&item_fn).unwrap_err();
         assert!(format!("{err}").contains("no #[zk_private]"));
     }
 
@@ -1797,8 +2450,141 @@ mod tests {
             }
             "#,
         );
-        let src = emit_transformed_contract(&item_fn).unwrap();
+        let src = emit_transformed(&item_fn).unwrap();
         assert!(src.contains("pub (crate)"));
         assert!(src.contains("Result < bool , Vec < u8 > >"));
+        assert!(src.contains("return Ok(false);"));
+        assert!(src.contains("    Ok(true)\n"));
+    }
+
+    #[test]
+    fn transformed_contract_inlines_runtime_event_constants() {
+        let item_fn = parse_fn_source(
+            r#"
+            pub fn f(#[zk_private(commit = "poseidon")] x: u64) -> bool { true }
+            "#,
+        );
+        let src = emit_transformed(&item_fn).unwrap();
+        // The signature string and precomputed topic0/circuit-id literals must come
+        // from zerostyl-runtime, so contracts and indexers agree by construction.
+        assert!(src.contains(zerostyl_runtime::ZeroStylPrivacyTransaction::SIGNATURE));
+        let topic0 = byte_array_literal(&zerostyl_runtime::ZeroStylPrivacyTransaction::topic0());
+        assert!(src.contains(&topic0));
+        let circuit_id =
+            byte_array_literal(zerostyl_runtime::BytecodeFingerprint::of(b"f").as_bytes());
+        assert!(src.contains(&circuit_id));
+    }
+
+    #[test]
+    fn transformed_contract_body_guards_and_emits() {
+        let item_fn = parse_fn_source(
+            r#"
+            pub fn deposit(#[zk_private(commit = "poseidon")] collateral: u64) -> bool { true }
+            "#,
+        );
+        let src = emit_transformed(&item_fn).unwrap();
+        parse_as_file(&src);
+        assert!(src.contains("if proof.is_empty()"));
+        assert!(src.contains("if collateral_commitment == B256::ZERO"));
+        assert!(src.contains("host.verify_proof(&proof, &public_inputs(collateral_commitment))"));
+        assert!(src.contains("host.is_nullifier_used(collateral_nullifier)"));
+        assert!(src.contains("host.mark_nullifier_used(collateral_nullifier);"));
+        assert!(src.contains("host.emit_privacy_transaction(&PrivacyTransactionRecord {"));
+        assert!(src.contains("pub trait DepositHost"));
+        assert!(src.contains("#[cfg(feature = \"zerostyl-stylus-contract\")]"));
+        assert!(src.contains("sol_storage!"));
+    }
+
+    #[test]
+    fn transformed_contract_merkle_adds_root_param() {
+        let item_fn = parse_fn_source(
+            r#"
+            pub fn claim(
+                #[zk_private(
+                    commit = "poseidon",
+                    constraint = "merkle_member(value, root, siblings, indices)"
+                )]
+                leaf: U256,
+            ) -> bool { true }
+            "#,
+        );
+        let src = emit_transformed(&item_fn).unwrap();
+        parse_as_file(&src);
+        assert!(src.contains("leaf_commitment: B256, root: B256"));
+        assert!(src
+            .contains("pub fn public_inputs(leaf_commitment: B256, root: B256) -> [[u8; 32]; 2]"));
+        assert!(src.contains("merkle_root: root,"));
+    }
+
+    #[test]
+    fn transformed_contract_rejects_root_name_collision() {
+        let item_fn = parse_fn_source(
+            r#"
+            pub fn claim(
+                #[zk_private(
+                    commit = "poseidon",
+                    constraint = "merkle_member(value, root, siblings, indices)"
+                )]
+                leaf: U256,
+                root: U256,
+            ) -> bool { true }
+            "#,
+        );
+        let err = emit_transformed(&item_fn).unwrap_err();
+        assert!(format!("{err}").contains("collision"));
+    }
+
+    #[test]
+    fn transformed_contract_rejects_reserved_param_names() {
+        let item_fn = parse_fn_source(
+            r#"
+            pub fn f(#[zk_private(commit = "poseidon")] x: u64, proof: u64) -> bool { true }
+            "#,
+        );
+        let err = emit_transformed(&item_fn).unwrap_err();
+        assert!(format!("{err}").contains("collision"));
+    }
+
+    #[test]
+    fn transformed_contract_rejects_unsupported_return_type() {
+        let item_fn = parse_fn_source(
+            r#"
+            pub fn f(#[zk_private(commit = "poseidon")] x: u64) -> u64 { 0 }
+            "#,
+        );
+        let err = emit_transformed(&item_fn).unwrap_err();
+        assert!(format!("{err}").contains("unsupported return type"));
+    }
+
+    #[test]
+    fn transformed_contract_sol_event_matches_runtime_signature() {
+        // The `sol!` event in the (feature-gated, never-compiled) stylus module must stay in sync
+        // with zerostyl_runtime's canonical SIGNATURE, or a deployed contract would emit an event
+        // whose topic0 differs from the one indexers filter on. Reconstruct the canonical
+        // signature from the emitted sol! field types and compare.
+        let item_fn = parse_fn_source(
+            r#"pub fn f(#[zk_private(commit = "poseidon")] x: u64) -> bool { true }"#,
+        );
+        let src = emit_transformed(&item_fn).unwrap();
+        let start = src.find("event ZeroStylPrivacyTransaction(").unwrap();
+        let body = &src[start..];
+        let inner = &body[body.find('(').unwrap() + 1..body.find(')').unwrap()];
+        let types: Vec<&str> =
+            inner.split(',').map(|field| field.split_whitespace().next().unwrap()).collect();
+        let reconstructed = format!("ZeroStylPrivacyTransaction({})", types.join(","));
+        assert_eq!(reconstructed, zerostyl_runtime::ZeroStylPrivacyTransaction::SIGNATURE);
+    }
+
+    #[test]
+    fn transformed_contract_rejects_commitless_private_param() {
+        // A range-only private param has no commitment, so its on-chain `_commitment` argument
+        // would bind no proof — reject it at the contract-transform layer.
+        let item_fn = parse_fn_source(
+            r#"
+            pub fn f(#[zk_private(range = "0..100")] age: u64) -> bool { true }
+            "#,
+        );
+        let err = emit_transformed(&item_fn).unwrap_err();
+        assert!(format!("{err}").contains("commit = \"poseidon\""));
     }
 }

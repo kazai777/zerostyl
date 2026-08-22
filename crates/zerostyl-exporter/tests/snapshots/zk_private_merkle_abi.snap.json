@@ -5,7 +5,7 @@
     "version": "1.0.0",
     "description": "Auto-generated descriptor for the 'claim' privacy-aware circuit.",
     "default_k": 10,
-    "num_public_inputs": 1,
+    "num_public_inputs": 2,
     "num_private_witnesses": 5
   },
   "witness": {
@@ -62,11 +62,17 @@
         "kind": {
           "type": "fp"
         }
+      },
+      {
+        "name": "root",
+        "kind": {
+          "type": "fp"
+        }
       }
     ]
   },
   "proof": {
     "format_version": 1,
-    "proving_system": "halo2_ipa"
+    "proving_system": "halo2_kzg"
   }
 }

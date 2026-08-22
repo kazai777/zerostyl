@@ -40,8 +40,10 @@ fn e2e_zk_private_demo_sync() {
 
     let circuit_src = pretty(&emit_circuit("deposit", &resolved).expect("emit_circuit"));
     let descriptor_src = pretty(&emit_descriptor("deposit", &resolved).expect("emit_descriptor"));
-    let transformed_src =
-        pretty(&emit_transformed_contract(&item_fn).expect("emit_transformed_contract"));
+    let transformed_src = pretty(
+        &emit_transformed_contract("deposit", &item_fn, &resolved)
+            .expect("emit_transformed_contract"),
+    );
     let abi_json = format!("{}\n", emit_abi_json("deposit", &resolved).expect("emit_abi_json"));
 
     let circuit_full = format!("{HEADER}{circuit_src}");

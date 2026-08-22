@@ -45,7 +45,7 @@ pub fn transform_contract(
 
     let circuit_src = pretty(&emit_circuit(&resolved_name, &resolved)?)?;
     let descriptor_src = pretty(&emit_descriptor(&resolved_name, &resolved)?)?;
-    let transformed_src = pretty(&emit_transformed_contract(&item_fn)?)?;
+    let transformed_src = pretty(&emit_transformed_contract(&resolved_name, &item_fn, &resolved)?)?;
     let abi_json = format!("{}\n", emit_abi_json(&resolved_name, &resolved)?);
 
     fs::create_dir_all(output_dir)
