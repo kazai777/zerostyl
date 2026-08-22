@@ -9,11 +9,6 @@ license = "MIT"
 [lib]
 crate-type = ["cdylib", "rlib"]
 
-[[bin]]
-name = "extract-vk-v2"
-path = "tools/extract_vk_v2.rs"
-required-features = ["std"]
-
 [dependencies]
 # Halo2 dependencies
 # Disable default features (multicore) for WASM compatibility
@@ -27,11 +22,6 @@ postcard = { version = "1.1", default-features = false, features = ["alloc"] }
 # Cryptography (no_std compatible)
 blake2 = { version = "0.10", default-features = false }
 
-# Regex for VK extraction tools (only needed with std)
-regex = { version = "1.10", optional = true }
-# Randomness for the extract-vk-v2 binary's trusted setup ceremony
-rand = { version = "0.8", optional = true }
-
 # Stylus SDK (optional, enabled with "stylus" feature)
 stylus-sdk = { version = "0.9", optional = true }
 alloy-primitives = { version = "0.8.20", default-features = false, optional = true }
@@ -42,15 +32,31 @@ mini-alloc = { version = "0.9", optional = true }
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.2", default-features = false, features = ["custom"] }
 
+# state_mask circuit — used (a) at runtime to name the circuit type for VK deserialization and
+# (b) at build time to generate its serialized VK + params. Only pulled in with the
+# `state_mask_vk` feature. `default-features = false` pulls ONLY the no_std circuit (not the
+# std-only descriptor/prover), so the state_mask verification path compiles for wasm32 too.
+[dependencies.state_mask]
+path = "../../examples/state_mask"
+optional = true
+default-features = false
+
 [build-dependencies]
 halo2_proofs = "=0.3.0"
 halo2curves = { version = "0.6", features = ["bits", "derive_serde"] }
 rand = "0.8"
+zerostyl-runtime = { path = "../zerostyl-runtime" }
+# Circuit-only at build time: build.rs just needs StateMaskCircuit for keygen_vk.
+state_mask = { path = "../../examples/state_mask", optional = true, default-features = false }
 
 [dev-dependencies]
 tempfile = "3.0"
 rand = "0.8"
-regex = "1.10"
+# For the state_mask interop test: the descriptor (real prover) needs state_mask's std feature and
+# the CircuitDescriptor trait. Feature unification gives the test builds the std descriptor while
+# the wasm build keeps the circuit-only dependency above.
+zerostyl-circuits = { path = "../zerostyl-circuits" }
+state_mask = { path = "../../examples/state_mask", features = ["std"] }
 
 [features]
 default = ["std"]
@@ -59,15 +65,20 @@ std = [
     "postcard/use-std",
     "halo2curves/default",
     "halo2curves/derive_serde",
-    "regex",
-    "rand",
+    "embedded_vk",
 ]
 stylus = [
     "stylus-sdk",
     "alloy-primitives",
     "mini-alloc",
 ]
-embedded_vk = []  # Enable VK embedding at build time
+# Embed the KZG params + serialized VK at build time and deserialize them at runtime
+# (VK read/write needs halo2curves' serde-enabled curve points).
+embedded_vk = ["halo2curves/derive_serde"]
+# Additionally embed the real state_mask circuit's params + VK and expose `verify_state_mask`.
+# Works in both std and no_std/wasm builds: it pulls only the circuit-only state_mask dependency,
+# so state_mask can be verified on-chain, not just off-chain.
+state_mask_vk = ["embedded_vk", "dep:state_mask"]
 
 # NOTE: [profile.release] and [profile.dev] are defined in the workspace root Cargo.toml
 # to avoid the "profiles for the non root package will be ignored" warning.

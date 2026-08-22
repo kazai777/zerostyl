@@ -972,6 +972,94 @@ fn test_mock_prover_nonzero_witnesses() {
     assert_eq!(prover.verify(), Ok(()), "Circuit with non-zero witnesses should verify");
 }
 
+// Builds an IR with a single u64 witness carrying one comparison constraint.
+#[cfg(test)]
+fn comparison_ir(
+    operator: zerostyl_compiler::ComparisonOp,
+    value: u64,
+) -> zerostyl_compiler::CircuitIR {
+    use zerostyl_compiler::{CircuitIR, Constraint, ZkField, ZkType};
+    use zerostyl_runtime::CircuitConfig;
+
+    CircuitIR {
+        name: "CmpCircuit".to_string(),
+        private_witnesses: vec![ZkField {
+            name: "x".to_string(),
+            field_type: ZkType::U64,
+            constraints: vec![Constraint::Comparison { operator, value }],
+        }],
+        public_inputs: vec![],
+        inter_field_constraints: vec![],
+        circuit_config: CircuitConfig::minimal(12).unwrap(),
+    }
+}
+
+#[test]
+fn test_generic_builder_rejects_commitment_constraint() {
+    use halo2_proofs::dev::MockProver;
+    use zerostyl_compiler::{CircuitIR, Constraint, HashType, ZkField, ZkType};
+    use zerostyl_runtime::CircuitConfig;
+
+    // The generic builder cannot enforce a cross-field commitment. It must FAIL synthesis rather
+    // than silently produce a circuit that leaves the "committed" witness unconstrained.
+    let ir = CircuitIR {
+        name: "CommitCircuit".to_string(),
+        private_witnesses: vec![ZkField {
+            name: "secret".to_string(),
+            field_type: ZkType::U64,
+            constraints: vec![Constraint::Commitment { hash_type: HashType::Poseidon }],
+        }],
+        public_inputs: vec![],
+        inter_field_constraints: vec![],
+        circuit_config: CircuitConfig::minimal(10).unwrap(),
+    };
+    let circuit = CircuitBuilder::new(ir)
+        .build::<TestField>()
+        .with_witnesses(vec![TestField::from(42u64)])
+        .unwrap();
+    // Synthesis returns Err → MockProver::run fails (does not silently accept).
+    assert!(
+        MockProver::run(10, &circuit, vec![vec![]]).is_err(),
+        "generic builder must reject an unenforceable commitment constraint"
+    );
+}
+
+#[test]
+fn test_comparison_arm_valid_passes() {
+    use halo2_proofs::dev::MockProver;
+    use zerostyl_compiler::ComparisonOp;
+
+    // 3 < 5 holds; both operands are in range, so the circuit verifies.
+    let ir = comparison_ir(ComparisonOp::LessThan, 5);
+    let circuit = CircuitBuilder::new(ir)
+        .build::<TestField>()
+        .with_witnesses(vec![TestField::from(3u64)])
+        .unwrap();
+    let prover = MockProver::run(12, &circuit, vec![vec![]]).unwrap();
+    assert_eq!(prover.verify(), Ok(()));
+}
+
+#[test]
+fn test_comparison_arm_rejects_field_wraparound() {
+    use halo2_proofs::dev::MockProver;
+    use zerostyl_compiler::ComparisonOp;
+
+    // Constraint is "x < 5". Feed x = p - 1 (a huge field element). In integer terms p-1 is
+    // NOT < 5, but without operand range checks assert_lt computes `5 - (p-1) - 1 ≡ 5 (mod p)`,
+    // which lands in [0, 2^64) and would falsely pass. The operand range check on x must reject
+    // p-1, so the circuit is unsatisfiable.
+    let ir = comparison_ir(ComparisonOp::LessThan, 5);
+    let circuit = CircuitBuilder::new(ir)
+        .build::<TestField>()
+        .with_witnesses(vec![TestField::from(0u64) - TestField::from(1u64)])
+        .unwrap();
+    let prover = MockProver::run(12, &circuit, vec![vec![]]).unwrap();
+    assert!(
+        prover.verify().is_err(),
+        "comparison arm must reject an out-of-range (field-wrapped) operand"
+    );
+}
+
 #[test]
 fn test_validate_circuit_array_size_boundary() {
     use zerostyl_compiler::{CircuitIR, ZkField, ZkType};

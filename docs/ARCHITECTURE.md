@@ -36,19 +36,26 @@
 │  │  zerostyl-compiler │  │ zerostyl-debugger  │  │  zerostyl-  ││
 │  │                    │  │                    │  │  exporter   ││
 │  │  • Parser          │  │  • zk-Mocking      │  │             ││
-│  │  • AST Transform   │  │  • CLI Interface   │  │  • TS SDK   ││
-│  │  • halo2 Circuit   │  │  • Constraint      │  │  • Rust SDK ││
-│  │  • WASM Codegen    │  │    Inspector       │  │  • Python   ││
+│  │  • AST Transform   │  │  • CLI Interface   │  │  • abi.json ││
+│  │  • halo2 Circuit   │  │  • Constraint      │  │  • codegen  ││
+│  │  • WASM Codegen    │  │    Inspector       │  │             ││
 │  └─────────┬──────────┘  └─────────┬──────────┘  └──────┬──────┘│
 │            │                       │                     │       │
-│            └───────────────┬───────┴─────────────────────┘       │
+│  ┌─────────▼──────────┐                          ┌───────▼──────┐│
+│  │  zerostyl-gadgets  │                          │  SDKs        ││
+│  │  (no_std, wasm32)  │                          │  • TS        ││
+│  │  • Poseidon        │                          │  • Rust      ││
+│  │  • range / cmp     │                          │  • Python    ││
+│  │  • Merkle          │                          └──────────────┘│
+│  └─────────┬──────────┘                                          │
+│            └───────────────┬─────────────────────────────┘       │
 │                            │                                     │
 │                   ┌────────▼────────┐                            │
 │                   │ zerostyl-runtime│                            │
 │                   │                 │                            │
 │                   │  • Core Types   │                            │
-│                   │  • Error Types  │                            │
-│                   │  • Shared Utils │                            │
+│                   │  • Events       │                            │
+│                   │  • Fingerprint  │                            │
 │                   └─────────────────┘                            │
 │                                                                   │
 └──────────────────────────────────────────────────────────────────┘
@@ -92,6 +99,11 @@ graph LR
     M --> P[Backend Services]
     N --> Q[Analytics Tools]
 ```
+
+The three SDKs live at [`packages/sdk-ts/`](../packages/sdk-ts/) (TypeScript),
+[`crates/zerostyl-sdk/`](../crates/zerostyl-sdk/) (Rust), and
+[`packages/sdk-py/`](../packages/sdk-py/) (Python). All consume the same
+`abi.json` contract (`zerostyl_circuits::abi::AbiSchema`).
 
 ### Detailed Flow Steps
 
@@ -143,10 +155,10 @@ graph LR
 | **CLI** | `clap` | 4.x | Command-line argument parsing |
 | **Async Runtime** | `tokio` | 1.x | Asynchronous task execution |
 
-### Why halo2_proofs?
+### Why halo2_proofs (KZG on BN254)?
 
-- ✅ **No Trusted Setup**: Transparent setup ceremony eliminates centralization risks
-- ✅ **Efficient Proving**: <100ms proof generation for typical circuits
+- ✅ **On-chain-friendly verification**: KZG on BN254 aligns with the EVM/Arbitrum BN254 precompiles, the path to a small on-chain verifier — unlike the transparent IPA-on-Pasta backend halo2 also offers.
+- ⚠️ **Trusted setup required**: KZG needs a structured reference string (SRS). ZeroStyl currently uses a **deterministic development SRS** (see `DEV_SRS_SEED` and `contracts/CONTRACTS.md`); a production deployment must replace it with a real Powers-of-Tau ceremony.
 - ✅ **Composability**: Supports recursive proofs and aggregation
 - ✅ **Rust-Native**: Seamless integration with Stylus ecosystem
 

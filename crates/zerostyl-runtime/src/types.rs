@@ -3,6 +3,9 @@
 //! This module defines fundamental data structures used throughout the ZeroStyl ecosystem
 //! for representing zero-knowledge proofs, cryptographic commitments, and circuit configurations.
 
+#[cfg(not(feature = "std"))]
+use alloc::{format, string::ToString, vec::Vec};
+
 use serde::{Deserialize, Serialize};
 
 /// Represents a zero-knowledge SNARK proof

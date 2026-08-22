@@ -2,18 +2,24 @@
 //!
 //! Proves three properties about secret state values without revealing them:
 //!
-//! 1. **Commitment**: `Poseidon(state_value, nonce) == commitment` (public)
+//! 1. **Commitment**: a Poseidon hash chain binds *all* committed secrets —
+//!    `commitment = H(H(H(state_value, collateral_ratio), hidden_balance), nonce)` (public)
 //! 2. **Range proof**: `collateral_ratio ∈ [150, 300]` (private, bounded)
 //! 3. **Comparison**: `hidden_balance > threshold` (threshold is public)
 //!
+//! The commitment binds `collateral_ratio` and `hidden_balance` so the range and comparison
+//! statements are about the *committed* values, not free witnesses. Without this binding a prover
+//! could satisfy the proof with any in-range collateral and any balance above the threshold,
+//! regardless of their actual (public) state — the proof would be vacuous.
+//!
 //! ## Public Inputs
 //!
-//! - `commitment`: Poseidon hash of (state_value, nonce)
+//! - `commitment`: Poseidon hash chain over (state_value, collateral_ratio, hidden_balance, nonce)
 //! - `threshold`: minimum balance requirement
 //!
 //! ## Private Witnesses
 //!
-//! - `state_value`: the secret value committed
+//! - `state_value`: an additional secret value bound into the commitment
 //! - `nonce`: commitment randomness
 //! - `collateral_ratio`: a ratio that must be in [150, 300]
 //! - `hidden_balance`: a balance that must exceed `threshold`
@@ -24,8 +30,14 @@
 //! - Balance threshold proofs (prove solvency without revealing balance)
 //! - General privacy-preserving state attestation
 
+// The circuit itself is no_std/wasm-compatible. The CircuitDescriptor (prover, witness JSON) needs
+// std and lives behind the `std` feature.
+#![cfg_attr(not(feature = "std"), no_std)]
+
+#[cfg(feature = "std")]
 pub mod descriptor;
 
+#[cfg(feature = "std")]
 pub use descriptor::descriptor;
 
 use halo2_proofs::{
@@ -33,7 +45,9 @@ use halo2_proofs::{
     plonk::{Circuit, Column, ConstraintSystem, Error, Instance},
 };
 use halo2curves::bn256::Fr;
-use zerostyl_compiler::gadgets::{
+// Gadgets come from the standalone no_std crate directly (not via zerostyl-compiler), so the
+// circuit does not pull the std-only compiler.
+use zerostyl_gadgets::{
     ComparisonChip, ComparisonConfig, PoseidonCommitmentChip, PoseidonCommitmentConfig,
     RangeProofChip, RangeProofConfig,
 };
@@ -67,6 +81,10 @@ pub struct StateMaskCircuit {
     pub threshold: Value<Fr>,
 }
 
+// `Value::default()` only exists when halo2's optional features pull it in (e.g. under
+// `--all-features`); without them the manual impl is required, so this cannot simply be derived
+// across all feature sets.
+#[allow(clippy::derivable_impls)]
 impl Default for StateMaskCircuit {
     fn default() -> Self {
         Self {
@@ -141,12 +159,22 @@ impl StateMaskCircuit {
         }
     }
 
-    /// Computes `Poseidon(state_value, nonce)` outside the circuit.
+    /// Computes the committed state hash outside the circuit.
     ///
-    /// Used for witness generation and public input computation.
+    /// Mirrors the in-circuit Poseidon hash chain exactly:
+    /// `H(H(H(state_value, collateral_ratio), hidden_balance), nonce)`. Used for witness
+    /// generation and public input computation. All four secrets are bound, so the public
+    /// commitment pins the exact `collateral_ratio` and `hidden_balance` the proof reasons about.
     #[must_use]
-    pub fn compute_commitment(state_value: Fr, nonce: Fr) -> Fr {
-        PoseidonCommitmentChip::hash_outside_circuit(state_value, nonce)
+    pub fn compute_commitment(
+        state_value: Fr,
+        collateral_ratio: Fr,
+        hidden_balance: Fr,
+        nonce: Fr,
+    ) -> Fr {
+        let c1 = PoseidonCommitmentChip::hash_outside_circuit(state_value, collateral_ratio);
+        let c2 = PoseidonCommitmentChip::hash_outside_circuit(c1, hidden_balance);
+        PoseidonCommitmentChip::hash_outside_circuit(c2, nonce)
     }
 }
 
@@ -185,17 +213,35 @@ impl Circuit<Fr> for StateMaskCircuit {
         )?;
         let nonce_cell =
             poseidon_chip.load_private(layouter.namespace(|| "load nonce"), self.nonce, 1)?;
+        let collateral_cell = range_chip
+            .load_value(layouter.namespace(|| "load collateral_ratio"), self.collateral_ratio)?;
+        let balance_cell = comparison_chip
+            .load_value(layouter.namespace(|| "load hidden_balance"), self.hidden_balance)?;
+        let threshold_cell =
+            comparison_chip.load_value(layouter.namespace(|| "load threshold"), self.threshold)?;
 
-        // --- 1. Commitment: Poseidon(state_value, nonce) ---
-        let commitment = poseidon_chip.commit(
-            layouter.namespace(|| "compute commitment"),
+        // --- 1. Commitment: Poseidon hash chain binding all committed secrets ---
+        // commitment = H(H(H(state_value, collateral_ratio), hidden_balance), nonce).
+        // Feeding the *same* collateral_cell / balance_cell that are range-checked and compared
+        // below (copy_advice enforces equality) ties the public commitment to those exact values,
+        // so the range/comparison statements are not about free witnesses.
+        let c1 = poseidon_chip.hash_two(
+            layouter.namespace(|| "commit chain: state_value, collateral"),
             state_value_cell,
+            collateral_cell.clone(),
+        )?;
+        let c2 = poseidon_chip.hash_two(
+            layouter.namespace(|| "commit chain: + hidden_balance"),
+            c1,
+            balance_cell.clone(),
+        )?;
+        let commitment = poseidon_chip.hash_two(
+            layouter.namespace(|| "commit chain: + nonce"),
+            c2,
             nonce_cell,
         )?;
 
         // --- 2. Range: collateral_ratio in [COLLATERAL_MIN, COLLATERAL_MAX] ---
-        let collateral_cell = range_chip
-            .load_value(layouter.namespace(|| "load collateral_ratio"), self.collateral_ratio)?;
         range_chip.check_range_bounded(
             layouter.namespace(|| "range check collateral"),
             collateral_cell,
@@ -205,10 +251,19 @@ impl Circuit<Fr> for StateMaskCircuit {
         )?;
 
         // --- 3. Comparison: hidden_balance > threshold ---
-        let balance_cell = comparison_chip
-            .load_value(layouter.namespace(|| "load hidden_balance"), self.hidden_balance)?;
-        let threshold_cell =
-            comparison_chip.load_value(layouter.namespace(|| "load threshold"), self.threshold)?;
+        // Range-check both operands first: assert_gt reduces to a range check on their difference,
+        // which is only sound when both operands are already in [0, 2^COMPARISON_BITS). Otherwise a
+        // field-wrapped hidden_balance (≈ p) could make the difference small and pass falsely.
+        range_chip.check_range(
+            layouter.namespace(|| "range check hidden_balance"),
+            balance_cell.clone(),
+            COMPARISON_BITS,
+        )?;
+        range_chip.check_range(
+            layouter.namespace(|| "range check threshold"),
+            threshold_cell.clone(),
+            COMPARISON_BITS,
+        )?;
 
         // Save Cell reference before consuming threshold_cell in assert_gt
         let threshold_cell_ref = threshold_cell.cell();
@@ -243,7 +298,12 @@ mod tests {
         threshold: u64,
     ) -> (StateMaskCircuit, Vec<Vec<Fr>>) {
         let nonce = Fr::from(nonce_raw);
-        let commitment = StateMaskCircuit::compute_commitment(Fr::from(state_value), nonce);
+        let commitment = StateMaskCircuit::compute_commitment(
+            Fr::from(state_value),
+            Fr::from(collateral_ratio),
+            Fr::from(hidden_balance),
+            nonce,
+        );
         let circuit =
             StateMaskCircuit::new(state_value, nonce, collateral_ratio, hidden_balance, threshold);
         let public_inputs = vec![vec![commitment, Fr::from(threshold)]];
@@ -268,7 +328,12 @@ mod tests {
     #[test]
     fn test_wrong_threshold_rejected() {
         let (circuit, _) = make_test_data(1000, 42, 200, 500, 100);
-        let commitment = StateMaskCircuit::compute_commitment(Fr::from(1000u64), Fr::from(42u64));
+        let commitment = StateMaskCircuit::compute_commitment(
+            Fr::from(1000u64),
+            Fr::from(200u64),
+            Fr::from(500u64),
+            Fr::from(42u64),
+        );
         let wrong_inputs = vec![vec![commitment, Fr::from(200u64)]];
         let prover = MockProver::run(TEST_K, &circuit, wrong_inputs).unwrap();
         assert!(prover.verify().is_err());
@@ -323,17 +388,48 @@ mod tests {
     fn test_commitment_deterministic() {
         let value = Fr::from(42u64);
         let nonce = Fr::from(123u64);
-        let c1 = StateMaskCircuit::compute_commitment(value, nonce);
-        let c2 = StateMaskCircuit::compute_commitment(value, nonce);
+        let c1 =
+            StateMaskCircuit::compute_commitment(value, Fr::from(200u64), Fr::from(500u64), nonce);
+        let c2 =
+            StateMaskCircuit::compute_commitment(value, Fr::from(200u64), Fr::from(500u64), nonce);
         assert_eq!(c1, c2);
     }
 
     #[test]
     fn test_commitment_different_nonce() {
         let value = Fr::from(42u64);
-        let c1 = StateMaskCircuit::compute_commitment(value, Fr::from(1u64));
-        let c2 = StateMaskCircuit::compute_commitment(value, Fr::from(2u64));
+        let c1 = StateMaskCircuit::compute_commitment(
+            value,
+            Fr::from(200u64),
+            Fr::from(500u64),
+            Fr::from(1u64),
+        );
+        let c2 = StateMaskCircuit::compute_commitment(
+            value,
+            Fr::from(200u64),
+            Fr::from(500u64),
+            Fr::from(2u64),
+        );
         assert_ne!(c1, c2);
+    }
+
+    #[test]
+    fn test_commitment_binds_hidden_balance() {
+        // Changing only hidden_balance must change the commitment — this is what makes the
+        // "balance > threshold" statement about the committed balance rather than a free witness.
+        let base = StateMaskCircuit::compute_commitment(
+            Fr::from(42u64),
+            Fr::from(200u64),
+            Fr::from(500u64),
+            Fr::from(7u64),
+        );
+        let changed = StateMaskCircuit::compute_commitment(
+            Fr::from(42u64),
+            Fr::from(200u64),
+            Fr::from(501u64),
+            Fr::from(7u64),
+        );
+        assert_ne!(base, changed);
     }
 
     #[test]
@@ -367,7 +463,14 @@ mod tests {
     fn test_circuit_rejects_collateral_below_min() {
         let state_value = 1000u64;
         let nonce = Fr::from(42u64);
-        let commitment = StateMaskCircuit::compute_commitment(Fr::from(state_value), nonce);
+        // Commitment computed over the actual (invalid) witness so the commitment binding holds
+        // and the *only* failing constraint is the collateral range check.
+        let commitment = StateMaskCircuit::compute_commitment(
+            Fr::from(state_value),
+            Fr::from(149u64),
+            Fr::from(500u64),
+            nonce,
+        );
 
         let circuit = StateMaskCircuit {
             state_value: Value::known(Fr::from(state_value)),
@@ -386,7 +489,12 @@ mod tests {
     fn test_circuit_rejects_collateral_above_max() {
         let state_value = 1000u64;
         let nonce = Fr::from(42u64);
-        let commitment = StateMaskCircuit::compute_commitment(Fr::from(state_value), nonce);
+        let commitment = StateMaskCircuit::compute_commitment(
+            Fr::from(state_value),
+            Fr::from(301u64),
+            Fr::from(500u64),
+            nonce,
+        );
 
         let circuit = StateMaskCircuit {
             state_value: Value::known(Fr::from(state_value)),
@@ -405,7 +513,12 @@ mod tests {
     fn test_circuit_rejects_balance_below_threshold() {
         let state_value = 1000u64;
         let nonce = Fr::from(42u64);
-        let commitment = StateMaskCircuit::compute_commitment(Fr::from(state_value), nonce);
+        let commitment = StateMaskCircuit::compute_commitment(
+            Fr::from(state_value),
+            Fr::from(200u64),
+            Fr::from(500u64),
+            nonce,
+        );
 
         let circuit = StateMaskCircuit {
             state_value: Value::known(Fr::from(state_value)),
@@ -424,7 +537,12 @@ mod tests {
     fn test_circuit_rejects_balance_equal_threshold() {
         let state_value = 1000u64;
         let nonce = Fr::from(42u64);
-        let commitment = StateMaskCircuit::compute_commitment(Fr::from(state_value), nonce);
+        let commitment = StateMaskCircuit::compute_commitment(
+            Fr::from(state_value),
+            Fr::from(200u64),
+            Fr::from(500u64),
+            nonce,
+        );
 
         let circuit = StateMaskCircuit {
             state_value: Value::known(Fr::from(state_value)),

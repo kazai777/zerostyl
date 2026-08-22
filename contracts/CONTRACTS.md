@@ -25,7 +25,7 @@ These contracts are pure state machines. They:
 ZeroStyl provides the off-chain layer that gives these contracts real cryptographic meaning:
 
 1. **ZeroStyl circuits** define the constraints (balance conservation, range checks, vote validity)
-2. **ZeroStyl NativeProver** generates a real halo2/IPA proof that witnesses satisfy constraints
+2. **ZeroStyl NativeProver** generates a real halo2 KZG-BN254 proof that witnesses satisfy constraints
 3. **ZeroStyl CLI** (`zerostyl-prove`) handles the full workflow: generate proof → verify locally → submit
 
 The privacy guarantee is real regardless: private witnesses (balances, randomness, vote values)
@@ -37,12 +37,46 @@ only commitments and proof bytes reach the blockchain.
 | Property | Status |
 |----------|--------|
 | Data privacy (witnesses never on-chain) | ✅ Enforced by design |
-| Double-spend / double-vote prevention | ✅ Enforced by nullifier sets |
-| Merkle membership enforcement | ✅ Enforced by root registry |
+| Uniqueness of a submitted nullifier | ✅ Enforced by nullifier sets |
+| Uniqueness of a registered merkle root | ✅ Enforced by root registry |
+| Double-spend prevention *of a real note* | ⚠️ Only sound once on-chain SNARK verification is enabled |
+| Merkle membership *of a real commitment* | ⚠️ Only sound once on-chain SNARK verification is enabled |
 | Cryptographic proof validity | ⚠️ Verified off-chain only (client-side) |
-| On-chain SNARK verification | 🔜 Pending Stylus WASM size increase |
+| On-chain SNARK verification | 🔜 Not yet wired (see zerostyl-verifier) |
 
-**This is testnet-ready**: demonstrates the full ZK privacy workflow. Not production-ready until
+> **Important caveat.** Because the proof is **not verified on-chain** yet, the contract cannot tell
+> whether a submitted `nullifier` / `commitment` / `merkle_root` actually came from a valid proof.
+> The nullifier and root sets only guarantee *uniqueness of the submitted value*, not that it
+> corresponds to a genuine spent note or a real tree. Consequences on testnet:
+> - Anyone can call `verify_transfer` with an arbitrary nullifier and burn it (griefing / DoS on a
+>   value someone else intended to use).
+> - State can be advanced without a valid proof.
+>
+> These become real guarantees only once the halo2 verifier is called on-chain. Progress so far:
+> the `zerostyl-verifier` crate performs a **real KZG verification** (params + serialized VK
+> embedded, no runtime keygen), and **`state_mask_verifier::verify_solvency` now calls it** — the
+> proof is cryptographically checked on-chain, not hashed. A proof from `zerostyl-prove` verifies
+> against the embedded VK thanks to a shared deterministic SRS (see
+> `crates/zerostyl-verifier/tests/state_mask_roundtrip.rs`; the legacy hash-only
+> `verify_range_proof` is deprecated).
+>
+> **Deployment caveat — the wired verifier is correct but NOT size-deployable.** Arbitrum Stylus
+> gates on a **24 KB Brotli-compressed** binary (the EVM code-size limit; up to 96 KB on a custom
+> chain) and a **128 KB uncompressed** WASM (`MaxWasmSize`; 256 KB at ArbOS 60+). `state_mask_verifier`
+> is ~240 KB compressed / ~559 KB uncompressed — roughly 10× over. Research finding: this cannot be
+> fixed by shrinking data. The embedded k=10 SRS is ~128 KB, but the halo2 `verify_proof` + BN254
+> pairing **code alone is ~91.5 KB compressed / ~374 KB uncompressed** — already ~4× the compressed
+> limit and ~3× the uncompressed limit before any data. Trimming the SRS to verifier-only points
+> (the verifier reads only `g[0]`, `g2`, `s_g2`; SHPLONK's `QUERY_INSTANCE=false` means `g_lagrange`
+> is never used) and `wasm-opt` (~10%) do not bridge a 10×/4× gap. Deploying on-chain requires
+> either **(a)** a hand-written minimal KZG verifier that offloads pairing to Arbitrum's BN254
+> precompile `0x08` (the approach PSE's `halo2-solidity-verifier` takes), or **(b)** wrapping the
+> proof in a Groth16 SNARK and deploying a tiny Groth16 verifier (the SP1/Polygon production
+> pattern). Both are substantial redesigns. The verification logic is real and tested; the contract
+> is a reference until one of those paths is implemented.
+
+**This is a testnet demo**: it demonstrates the full off-chain ZK privacy workflow and the on-chain
+state machine. It is **not** production-ready and its integrity guarantees are conditional until
 on-chain verification is enabled.
 
 ---
@@ -260,4 +294,4 @@ contracts/
 ```
 
 Each contract is an independent Rust crate with its own `rust-toolchain.toml` pinned to
-Rust 1.85.0. Deployment addresses are tracked in [`docs/DEPLOYMENTS.md`](docs/DEPLOYMENTS.md).
+Rust 1.85.0. Deployment addresses are tracked in [`docs/DEPLOYMENTS.md`](../docs/DEPLOYMENTS.md).

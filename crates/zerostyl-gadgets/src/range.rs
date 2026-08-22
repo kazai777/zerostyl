@@ -13,6 +13,8 @@
 //! For bounded range `[min, max]`:
 //! - Prove `v - min ∈ [0, 2^N)` AND `max - v ∈ [0, 2^N)`
 
+#[cfg(not(test))]
+use alloc::{format, vec, vec::Vec};
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, Value},
     plonk::{Advice, Column, ConstraintSystem, Error, Fixed, Selector},
@@ -28,6 +30,7 @@ pub struct RangeProofConfig {
     bits_col: Column<Advice>,
     bool_selector: Selector,
     recompose_selector: Selector,
+    init_selector: Selector,
     bounded_diff_selector: Selector,
     bounded_diff_reverse_selector: Selector,
     fixed_col: Column<Fixed>,
@@ -50,6 +53,7 @@ impl RangeProofChip {
 
         let bool_selector = meta.selector();
         let recompose_selector = meta.selector();
+        let init_selector = meta.selector();
         let bounded_diff_selector = meta.selector();
         let bounded_diff_reverse_selector = meta.selector();
         let fixed_col = meta.fixed_column();
@@ -77,6 +81,17 @@ impl RangeProofChip {
             ]
         });
 
+        // Initial accumulator constraint: the running accumulator on row 0 must be zero.
+        // Without this, a malicious prover could assign a non-zero `acc_init` and, since the
+        // recompose gate only links consecutive rows, make the final accumulator equal any
+        // value while still satisfying `acc_final == value`. That would let arbitrary field
+        // elements pass the range check. Pinning row 0 to zero closes that soundness hole.
+        meta.create_gate("range init zero", |meta| {
+            let s = meta.query_selector(init_selector);
+            let acc_init = meta.query_advice(value_col, Rotation::cur());
+            vec![s * acc_init]
+        });
+
         // Bounded diff constraint: value - constant - diff == 0
         // Used for: diff = value - min (proving value >= min)
         meta.create_gate("bounded diff", |meta| {
@@ -102,6 +117,7 @@ impl RangeProofChip {
             bits_col,
             bool_selector,
             recompose_selector,
+            init_selector,
             bounded_diff_selector,
             bounded_diff_reverse_selector,
             fixed_col,
@@ -142,7 +158,9 @@ impl RangeProofChip {
                 // Extract the value for bit decomposition (MSB first)
                 let value_fp = value.value().copied();
 
-                // Row 0: initial accumulator = 0
+                // Row 0: initial accumulator = 0, pinned by the "range init zero" gate so a
+                // malicious prover cannot seed the accumulator with a non-zero offset.
+                self.config.init_selector.enable(&mut region, 0)?;
                 region.assign_advice(
                     || "acc init",
                     self.config.value_col,
@@ -516,5 +534,112 @@ mod tests {
         let k = 10;
         let result = MockProver::run(k, &circuit, vec![]);
         assert!(result.is_err(), "check_range(65 bits) must return Err");
+    }
+
+    /// Adversarial circuit that replicates the range-check region layout but seeds the running
+    /// accumulator on row 0 with a non-zero value. It picks `acc_init` so that the honest
+    /// boolean bit witnesses of `value`'s low `num_bits` bits still recompose to `value` at the
+    /// end (`acc_init * 2^num_bits + low_bits == value`). Before the "range init zero" gate was
+    /// added, this let any out-of-range field element satisfy the range check. Used to lock in
+    /// the soundness fix.
+    #[derive(Clone)]
+    struct ForgedAccInitCircuit {
+        value: Fr,
+        num_bits: usize,
+    }
+
+    impl Circuit<Fr> for ForgedAccInitCircuit {
+        type Config = RangeProofConfig;
+        type FloorPlanner = SimpleFloorPlanner;
+
+        fn without_witnesses(&self) -> Self {
+            Self { value: self.value, num_bits: self.num_bits }
+        }
+
+        fn configure(meta: &mut ConstraintSystem<Fr>) -> RangeProofConfig {
+            RangeProofChip::configure(meta)
+        }
+
+        fn synthesize(
+            &self,
+            config: RangeProofConfig,
+            mut layouter: impl Layouter<Fr>,
+        ) -> Result<(), Error> {
+            layouter.assign_region(
+                || "forged range check",
+                |mut region| {
+                    let n = self.num_bits;
+                    let repr = self.value.to_repr();
+                    let low_bits: Vec<u64> =
+                        (0..n).map(|i| u64::from((repr.as_ref()[i / 8] >> (i % 8)) & 1)).collect();
+                    let low_val: Fr = low_bits.iter().enumerate().fold(Fr::ZERO, |acc, (i, b)| {
+                        acc + Fr::from(*b) * Fr::from(2u64).pow([i as u64])
+                    });
+                    // acc_init = (value - low_val) / 2^n  ⇒  acc_final == value.
+                    let pow = Fr::from(2u64).pow([n as u64]);
+                    let acc_init = (self.value - low_val) * pow.invert().unwrap();
+
+                    config.init_selector.enable(&mut region, 0)?;
+                    region.assign_advice(
+                        || "forged acc init",
+                        config.value_col,
+                        0,
+                        || Value::known(acc_init),
+                    )?;
+
+                    let mut acc = acc_init;
+                    let mut last = None;
+                    for (row, i) in (0..n).rev().enumerate() {
+                        config.bool_selector.enable(&mut region, row)?;
+                        config.recompose_selector.enable(&mut region, row)?;
+                        let bit = Fr::from(low_bits[i]);
+                        region.assign_advice(
+                            || "bit",
+                            config.bits_col,
+                            row,
+                            || Value::known(bit),
+                        )?;
+                        acc = acc * Fr::from(2u64) + bit;
+                        last = Some(region.assign_advice(
+                            || "acc",
+                            config.value_col,
+                            row + 1,
+                            || Value::known(acc),
+                        )?);
+                    }
+
+                    let value_cell = region.assign_advice(
+                        || "value",
+                        config.bits_col,
+                        n,
+                        || Value::known(self.value),
+                    )?;
+                    region.constrain_equal(last.unwrap().cell(), value_cell.cell())?;
+                    Ok(())
+                },
+            )
+        }
+    }
+
+    #[test]
+    fn test_forged_acc_init_out_of_range_rejected() {
+        // 256 is out of [0, 2^8); the forged accumulator seed makes recomposition + boolean
+        // gates pass, so only the "range init zero" gate can catch it.
+        let circuit = ForgedAccInitCircuit { value: Fr::from(256u64), num_bits: 8 };
+        let k = 10;
+        let prover = MockProver::run(k, &circuit, vec![]).unwrap();
+        assert!(
+            prover.verify().is_err(),
+            "forged non-zero acc_init must be rejected by the range init gate"
+        );
+    }
+
+    #[test]
+    fn test_forged_acc_init_large_value_rejected() {
+        // A far out-of-range value (2^40 into an 8-bit check) must also be rejected.
+        let circuit = ForgedAccInitCircuit { value: Fr::from(1u64 << 40), num_bits: 8 };
+        let k = 10;
+        let prover = MockProver::run(k, &circuit, vec![]).unwrap();
+        assert!(prover.verify().is_err(), "forged acc_init must be rejected for large values");
     }
 }

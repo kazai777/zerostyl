@@ -1,1 +1,1 @@
-pub const ABI_VERSION: u32 = 1;
+pub use zerostyl_circuits::ABI_VERSION;

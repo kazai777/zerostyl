@@ -79,6 +79,6 @@
   },
   "proof": {
     "format_version": 1,
-    "proving_system": "halo2_ipa"
+    "proving_system": "halo2_kzg"
   }
 }

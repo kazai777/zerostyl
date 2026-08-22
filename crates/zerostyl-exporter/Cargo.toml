@@ -11,6 +11,7 @@ categories = ["cryptography", "development-tools"]
 
 [dependencies]
 zerostyl-circuits = { path = "../zerostyl-circuits" }
+zerostyl-runtime = { path = "../zerostyl-runtime" }
 example_demo = { path = "../../examples/example_demo" }
 state_mask = { path = "../../examples/state_mask" }
 tx_privacy = { path = "../../examples/tx_privacy" }

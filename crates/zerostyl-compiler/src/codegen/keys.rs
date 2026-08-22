@@ -36,7 +36,14 @@ impl KeyManager {
     }
 
     pub fn params_path(&self, k: u32) -> PathBuf {
-        self.cache_dir.join(format!("params_k{}.bin", k))
+        // The SRS seed is part of the filename: a cache written with a different seed (e.g. the
+        // pre-migration OsRng build, or a future seed change) must NOT be silently reused — that
+        // would produce proofs the verifier's embedded params reject with no diagnostic.
+        self.cache_dir.join(format!(
+            "params_k{}_seed{:016x}.bin",
+            k,
+            zerostyl_runtime::DEV_SRS_SEED
+        ))
     }
 
     pub fn metadata_path(&self, circuit_name: &str, k: u32) -> PathBuf {
@@ -50,7 +57,12 @@ impl KeyManager {
             return self.load_params(k);
         }
 
-        let params = ParamsKZG::<Bn256>::setup(k, rand::rngs::OsRng);
+        // Deterministic SRS from the shared dev seed so a proof produced here verifies against the
+        // parameters embedded in zerostyl-verifier (same seed, same k → identical params). This is
+        // a reproducible dev setup, not a secure ceremony — see `DEV_SRS_SEED`.
+        use rand::SeedableRng;
+        let mut rng = rand::rngs::StdRng::seed_from_u64(zerostyl_runtime::DEV_SRS_SEED);
+        let params = ParamsKZG::<Bn256>::setup(k, &mut rng);
         self.save_params(&params, k)?;
         Ok(params)
     }
@@ -116,7 +128,12 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let manager = KeyManager::new(temp_dir.path()).unwrap();
 
-        assert_eq!(manager.params_path(10), temp_dir.path().join("params_k10.bin"));
+        assert_eq!(
+            manager.params_path(10),
+            temp_dir
+                .path()
+                .join(format!("params_k10_seed{:016x}.bin", zerostyl_runtime::DEV_SRS_SEED))
+        );
         assert_eq!(
             manager.metadata_path("test_circuit", 10),
             temp_dir.path().join("test_circuit_k10_metadata.json")

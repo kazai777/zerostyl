@@ -53,20 +53,17 @@ impl Circuit<Fr> for ClaimCircuit {
     ) -> std::result::Result<(), Error> {
         let poseidon_chip = PoseidonCommitmentChip::construct(config.poseidon_config);
         let merkle_chip = MerkleTreeChip::construct(config.merkle_config.clone());
-        let leaf_poseidon_value = poseidon_chip.load_private(
-            layouter.namespace(|| "load leaf for poseidon"),
-            self.leaf,
-            0,
-        )?;
-        let leaf_poseidon_nonce = poseidon_chip.load_private(
-            layouter.namespace(|| "load leaf_nonce for poseidon"),
+        let leaf_value =
+            poseidon_chip.load_private(layouter.namespace(|| "load leaf"), self.leaf, 0)?;
+        let leaf_nonce_cell = poseidon_chip.load_private(
+            layouter.namespace(|| "load leaf_nonce"),
             self.leaf_nonce,
             1,
         )?;
         let leaf_commitment = poseidon_chip.commit(
             layouter.namespace(|| "commit leaf"),
-            leaf_poseidon_value.clone(),
-            leaf_poseidon_nonce,
+            leaf_value.clone(),
+            leaf_nonce_cell,
         )?;
         let leaf_commitment_ref = leaf_commitment.cell();
         layouter.constrain_instance(leaf_commitment_ref, config.instance, 0usize)?;
@@ -98,6 +95,7 @@ impl Circuit<Fr> for ClaimCircuit {
             &leaf_sibling_cells,
             &leaf_index_cells,
         )?;
+        layouter.constrain_instance(leaf_computed_root.cell(), config.instance, 1usize)?;
         Ok(())
     }
 }

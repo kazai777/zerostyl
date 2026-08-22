@@ -20,7 +20,7 @@ const NAME: &str = "claim";
 const VERSION: &str = "1.0.0";
 const DESCRIPTION: &str = "Auto-generated descriptor for the 'claim' privacy-aware circuit.";
 const DEFAULT_K: u32 = 10;
-const NUM_PUBLIC_INPUTS: usize = 1usize;
+const NUM_PUBLIC_INPUTS: usize = 2usize;
 const NUM_PRIVATE_WITNESSES: usize = 5usize;
 const MERKLE_DEPTH: usize = 32;
 #[derive(Debug, Deserialize)]
@@ -91,7 +91,7 @@ fn build_inputs(w: &WitnessJson) -> CResult<ParsedInputs> {
         siblings: siblings.iter().map(|v| Value::known(*v)).collect(),
         indices: indices.iter().map(|v| Value::known(*v)).collect(),
     };
-    let public_inputs = vec![vec![leaf_commitment]];
+    let public_inputs = vec![vec![leaf_commitment, root]];
     Ok(ParsedInputs { circuit, public_inputs })
 }
 fn encode_public_inputs(inputs: &[Vec<Fr>]) -> String {
@@ -218,11 +218,14 @@ fn witness_schema_static() -> &'static WitnessSchema {
 fn public_inputs_schema_static() -> &'static PublicInputsSchema {
     static S: OnceLock<PublicInputsSchema> = OnceLock::new();
     S.get_or_init(|| PublicInputsSchema {
-        fields: vec![PublicInputField {
-            name: "leaf_commitment".into(),
-            kind: FieldType::Fp,
-            description: None,
-        }],
+        fields: vec![
+            PublicInputField {
+                name: "leaf_commitment".into(),
+                kind: FieldType::Fp,
+                description: None,
+            },
+            PublicInputField { name: "root".into(), kind: FieldType::Fp, description: None },
+        ],
     })
 }
 pub struct ClaimDescriptor;

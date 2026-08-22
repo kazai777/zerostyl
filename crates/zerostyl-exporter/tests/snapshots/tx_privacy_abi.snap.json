@@ -5,7 +5,7 @@
     "version": "1.0.0",
     "description": "Private token transfer: balance conservation + Poseidon commitments + Merkle membership.",
     "default_k": 14,
-    "num_public_inputs": 3,
+    "num_public_inputs": 4,
     "num_private_witnesses": 6
   },
   "witness": {
@@ -98,11 +98,18 @@
           "type": "fp"
         },
         "description": "Account-set Merkle root containing commitment_old."
+      },
+      {
+        "name": "nullifier",
+        "kind": {
+          "type": "fp"
+        },
+        "description": "Poseidon(randomness_old, balance_old): deterministic per spent note, unlinkable to commitment_old; consumed on-chain to prevent double-spends."
       }
     ]
   },
   "proof": {
     "format_version": 1,
-    "proving_system": "halo2_ipa"
+    "proving_system": "halo2_kzg"
   }
 }

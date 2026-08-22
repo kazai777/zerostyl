@@ -14,25 +14,7 @@ pub const GENERATED_DESCRIPTOR_VERSION: &str = "1.0.0";
 pub const GENERATED_DESCRIPTOR_DEFAULT_K: u32 = 10;
 
 pub fn from_descriptor(desc: &dyn CircuitDescriptor) -> AbiSchema {
-    AbiSchema {
-        abi_version: ABI_VERSION,
-        circuit: CircuitMetadata {
-            name: desc.name().to_string(),
-            version: desc.version().to_string(),
-            description: desc.description().to_string(),
-            default_k: desc.default_k(),
-            num_public_inputs: desc.num_public_inputs(),
-            num_private_witnesses: desc.num_private_witnesses(),
-        },
-        witness: desc.witness_schema().clone(),
-        public_inputs: desc.public_inputs_schema().clone(),
-        proof: ProofMetadata {
-            format_version: 1,
-            approx_size_bytes: None,
-            proving_system: ProvingSystem::Halo2Ipa,
-        },
-        on_chain: None,
-    }
+    AbiSchema::from_descriptor(desc)
 }
 
 pub fn from_attrs(circuit_name: &str, attrs: &[ResolvedAttr]) -> Result<AbiSchema> {
@@ -55,7 +37,7 @@ pub fn from_attrs(circuit_name: &str, attrs: &[ResolvedAttr]) -> Result<AbiSchem
         proof: ProofMetadata {
             format_version: 1,
             approx_size_bytes: None,
-            proving_system: ProvingSystem::Halo2Ipa,
+            proving_system: ProvingSystem::Halo2Kzg,
         },
         on_chain: None,
     })
@@ -154,16 +136,42 @@ fn build_witness_schema(attrs: &[ResolvedAttr]) -> Result<WitnessSchema> {
     Ok(WitnessSchema { fields })
 }
 
+// Priority mirrors codegen::binding_priority so the ABI public-input order matches the order in
+// which the generated circuit binds them to instance columns (Poseidon commitment before the
+// Merkle root).
+fn public_input_priority(b: &GadgetBinding) -> u8 {
+    match b {
+        GadgetBinding::PoseidonCommit { .. } => 0,
+        GadgetBinding::Range { .. } => 1,
+        GadgetBinding::Comparison { .. } => 2,
+        GadgetBinding::MerkleMember { .. } => 3,
+    }
+}
+
 fn build_public_inputs_schema(attrs: &[ResolvedAttr]) -> PublicInputsSchema {
     let mut fields = Vec::new();
     for attr in attrs {
-        for b in &attr.bindings {
-            if matches!(b, GadgetBinding::PoseidonCommit { .. }) {
-                fields.push(PublicInputField {
-                    name: format!("{}_commitment", attr.param_name),
-                    kind: FieldType::Fp,
-                    description: None,
-                });
+        let mut sorted = attr.bindings.clone();
+        sorted.sort_by_key(public_input_priority);
+        for b in &sorted {
+            match b {
+                GadgetBinding::PoseidonCommit { .. } => {
+                    fields.push(PublicInputField {
+                        name: format!("{}_commitment", attr.param_name),
+                        kind: FieldType::Fp,
+                        description: None,
+                    });
+                }
+                // The Merkle membership exposes its recomputed root as a public input so the
+                // verifier checks the path against a root it supplies (see codegen::emit_merkle).
+                GadgetBinding::MerkleMember { root_var, .. } => {
+                    fields.push(PublicInputField {
+                        name: root_var.clone(),
+                        kind: FieldType::Fp,
+                        description: None,
+                    });
+                }
+                _ => {}
             }
         }
     }
@@ -272,9 +280,9 @@ mod tests {
     }
 
     #[test]
-    fn defaults_to_halo2_ipa_and_unknown_size() {
+    fn defaults_to_halo2_kzg_and_unknown_size() {
         let abi = from_descriptor(&DummyDescriptor);
-        assert_eq!(abi.proof.proving_system, ProvingSystem::Halo2Ipa);
+        assert_eq!(abi.proof.proving_system, ProvingSystem::Halo2Kzg);
         assert_eq!(abi.proof.approx_size_bytes, None);
         assert_eq!(abi.proof.format_version, 1);
     }
@@ -390,6 +398,29 @@ mod tests {
     }
 
     #[test]
+    fn from_attrs_merkle_exposes_commitment_and_root_public_inputs() {
+        let attrs = vec![resolved(
+            "leaf",
+            "U256",
+            vec![
+                AttrSpec::Commit(CommitScheme::Poseidon),
+                AttrSpec::MerkleMember(MerkleMemberSpec {
+                    root_var: "root".into(),
+                    siblings_var: "siblings".into(),
+                    indices_var: "indices".into(),
+                }),
+            ],
+        )];
+        let abi = from_attrs("claim", &attrs).unwrap();
+        // The recomputed Merkle root must be a public input alongside the commitment, otherwise
+        // the membership proof is vacuous (any tree would satisfy it).
+        assert_eq!(abi.circuit.num_public_inputs, 2);
+        let names: Vec<&str> = abi.public_inputs.fields.iter().map(|f| f.name.as_str()).collect();
+        // Order must match the circuit's instance bindings: commitment (idx 0), root (idx 1).
+        assert_eq!(names, vec!["leaf_commitment", "root"]);
+    }
+
+    #[test]
     fn from_attrs_unknown_type_errors() {
         let attrs = vec![ResolvedAttr {
             param_name: "x".into(),
@@ -407,7 +438,7 @@ mod tests {
         let json = emit_abi_json("deposit", &attrs).unwrap();
         assert!(json.contains("\"abi_version\": 1"));
         assert!(json.contains("\"name\": \"deposit\""));
-        assert!(json.contains("\"proving_system\": \"halo2_ipa\""));
+        assert!(json.contains("\"proving_system\": \"halo2_kzg\""));
         let parsed: AbiSchema = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.circuit.name, "deposit");
     }
@@ -423,7 +454,7 @@ mod tests {
             abi.circuit.description,
             "Auto-generated descriptor for the 'deposit' privacy-aware circuit."
         );
-        assert_eq!(abi.proof.proving_system, ProvingSystem::Halo2Ipa);
+        assert_eq!(abi.proof.proving_system, ProvingSystem::Halo2Kzg);
         assert_eq!(abi.proof.format_version, 1);
         assert!(abi.on_chain.is_none());
     }

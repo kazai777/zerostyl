@@ -1,10 +1,14 @@
-//! Reference circuit for VK generation and verification testing
+//! Reference circuit for VK generation and verification testing.
 //!
-//! This module defines a simple addition circuit used as the default
-//! circuit for VK generation in halo2_proofs v0.3.2, which lacks
-//! VK serialization. The VK is regenerated at runtime via `keygen_vk`.
+//! A minimal addition circuit used as the built-in verifiable circuit. Its verifying key is
+//! generated and serialized at build time (see `build.rs`) and deserialized at runtime — halo2
+//! 0.3.0 (PSE fork) supports VK serialization, so there is no `keygen_vk` on the verify path.
+//! This exact circuit is duplicated in `build.rs`; a drift-guard test keeps the two in sync.
 //!
 //! Gate: `a + b = sum` where `sum` is a public input.
+
+#[cfg(not(feature = "std"))]
+use alloc::vec;
 
 use halo2_proofs::{
     circuit::{Layouter, SimpleFloorPlanner, Value},

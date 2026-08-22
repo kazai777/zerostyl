@@ -10,6 +10,8 @@
 //! where `(left, right)` is determined by the path index bit at that level.
 //! Supports configurable depth (default 32, matching Tornado Cash / Semaphore).
 
+#[cfg(not(test))]
+use alloc::{format, vec};
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, Value},
     plonk::{Advice, Column, ConstraintSystem, Error, Expression, Selector},

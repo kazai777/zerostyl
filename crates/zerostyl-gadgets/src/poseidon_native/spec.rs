@@ -1,3 +1,5 @@
+#[cfg(not(test))]
+use alloc::vec::Vec;
 use halo2_poseidon::{Mds, Spec};
 use halo2curves::bn256::Fr;
 use halo2curves::group::ff::Field;

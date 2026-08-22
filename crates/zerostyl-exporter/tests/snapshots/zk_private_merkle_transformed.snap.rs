@@ -1,5 +1,211 @@
-#![allow(clippy::all, dead_code, unused_variables)]
-use alloy_primitives::{Bytes, B256};
-pub fn claim(leaf_commitment: B256, proof: Bytes) -> bool {
-    todo!()
+#![allow(dead_code, unused_variables, unexpected_cfgs)]
+//! Privacy-transformed ABI for the `claim` circuit.
+//!
+//! Each `#[zk_private]` parameter of the source function is replaced by its
+//! commitment (`B256`), and a trailing `proof: Bytes` carries the halo2 KZG
+//! proof. The proof attests, without revealing the private values (see
+//! `circuit.rs`):
+//!
+//! - `leaf_commitment` = Poseidon(leaf, leaf_nonce) — public input 0
+//! - `leaf_commitment` is a leaf of the Merkle tree rooted at `root` (depth 32) — public input 1
+//!
+//! Public inputs are 32-byte **little-endian** field representations
+//! (`Fr::to_repr()`), in the order listed above.
+//!
+//! # Verification model
+//!
+//! Proofs are NOT cryptographically verified on-chain: Arbitrum Stylus caps
+//! deployable contracts at 24 KB Brotli-compressed, while the halo2 KZG verifier
+//! alone exceeds 90 KB. This module implements a hash-guard flow instead —
+//! keccak256 proof hash, one-shot nullifier registry, standardized
+//! `ZeroStylPrivacyTransaction` event — and exposes [`ClaimHost::verify_proof`]
+//! as the hook where real verification plugs in (host-side via
+//! `zerostyl-verifier`, or on-chain once a verifier fits the size budget).
+
+use alloy_primitives::{keccak256, Bytes, B256};
+
+/// Canonical privacy-transaction event signature
+/// (`zerostyl_runtime::ZeroStylPrivacyTransaction::SIGNATURE`).
+pub const ZEROSTYL_PRIVACY_TX_SIGNATURE: &str =
+    "ZeroStylPrivacyTransaction(bytes32,bytes32,bytes32,bytes32,bytes32,uint256)";
+
+/// keccak256 of [`ZEROSTYL_PRIVACY_TX_SIGNATURE`] — the EVM log topic0 that
+/// indexers filter on. Precomputed at generation time.
+pub const ZEROSTYL_PRIVACY_TX_TOPIC0: [u8; 32] = [
+    0x84, 0xcd, 0x6e, 0xcc, 0x9e, 0x8e, 0x48, 0xed, 0x1f, 0x47, 0xbf, 0x9e, 0xd0, 0x20, 0xf9, 0x12,
+    0x17, 0x37, 0xd0, 0x80, 0x25, 0x83, 0xf7, 0x4d, 0xc7, 0xf0, 0xfd, 0x27, 0x49, 0x29, 0x40, 0x98,
+];
+
+/// keccak256 of the circuit name `"claim"` — identifies which circuit
+/// produced a proof (`zerostyl_runtime::BytecodeFingerprint`). Production
+/// deployments should fingerprint the deployed verifier bytecode instead of the
+/// name.
+pub const CIRCUIT_ID: [u8; 32] = [
+    0xb8, 0xb7, 0x58, 0x36, 0x1d, 0x5e, 0x84, 0x38, 0x0e, 0xf1, 0xe6, 0x32, 0xf8, 0x9d, 0x8e, 0x76,
+    0xa8, 0x67, 0x7d, 0xbc, 0x3f, 0x4b, 0x93, 0xa4, 0xf9, 0xd7, 0x5d, 0x2a, 0x60, 0x48, 0xf3, 0x12,
+];
+
+const NULLIFIER_DOMAIN: [u8; 21] = *b"zerostyl.nullifier.v1";
+
+/// Mirror of `zerostyl_runtime::events::ZeroStylPrivacyTransaction`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PrivacyTransactionRecord {
+    pub circuit: B256,
+    pub nullifier: B256,
+    pub commitment: B256,
+    pub merkle_root: B256,
+    pub proof_hash: B256,
+    pub timestamp: u64,
+}
+
+/// Hooks the embedding contract provides: nullifier storage, clock, event sink,
+/// and the proof-verification hook.
+pub trait ClaimHost {
+    /// Whether `nullifier` was already consumed by an accepted submission.
+    fn is_nullifier_used(&self, nullifier: B256) -> bool;
+    /// Persist `nullifier` as consumed.
+    fn mark_nullifier_used(&mut self, nullifier: B256);
+    /// Current block timestamp, in seconds.
+    fn block_timestamp(&self) -> u64;
+    /// Emit the standardized privacy-transaction event
+    /// (topic0 = [`ZEROSTYL_PRIVACY_TX_TOPIC0`]).
+    fn emit_privacy_transaction(&mut self, record: &PrivacyTransactionRecord);
+    /// Proof-verification hook. `public_inputs` are 32-byte little-endian field
+    /// representations in circuit order.
+    ///
+    /// Fails closed by default: returns `false` so an unconfigured contract
+    /// rejects every submission rather than accepting unverified proofs. You
+    /// MUST override this to call a real verifier (e.g. `zerostyl-verifier`)
+    /// before the contract accepts anything.
+    fn verify_proof(&self, proof: &[u8], public_inputs: &[[u8; 32]]) -> bool {
+        let _ = (proof, public_inputs);
+        false
+    }
+}
+
+/// Public inputs in circuit order: `[0]` = `leaf_commitment`, `[1]` = `root`.
+/// Values are forwarded as 32-byte little-endian field representations.
+pub fn public_inputs(leaf_commitment: B256, root: B256) -> [[u8; 32]; 2] {
+    [leaf_commitment.0, root.0]
+}
+
+/// Per-commitment idempotence key: `keccak256(NULLIFIER_DOMAIN ‖ commitment)`.
+///
+/// Derived from the commitment ALONE (not the proof bytes), so a commitment can
+/// be accepted only once — re-proving the same statement yields a fresh,
+/// transcript-randomized proof but the same key, and the replay guard still
+/// fires. This matches the contracts/state_mask_verifier model. It is a replay
+/// guard over public data, NOT an unlinkable nullifier — a production circuit
+/// should expose a real nullifier as a dedicated public input.
+pub fn derive_nullifier(commitment: B256) -> B256 {
+    let mut buf = [0u8; 21 + 32];
+    buf[..21].copy_from_slice(&NULLIFIER_DOMAIN);
+    buf[21..].copy_from_slice(commitment.as_slice());
+    keccak256(buf)
+}
+
+/// Privacy-transformed entry point for `claim`.
+///
+/// All guards run before any state change: empty proof, zero commitment, the
+/// [`ClaimHost::verify_proof`] hook, and nullifier replay are rejected
+/// atomically. On acceptance every nullifier is marked used and one record per
+/// private parameter is emitted.
+pub fn claim(host: &mut impl ClaimHost, leaf_commitment: B256, root: B256, proof: Bytes) -> bool {
+    if proof.is_empty() {
+        return false;
+    }
+    if leaf_commitment == B256::ZERO {
+        return false;
+    }
+    if !host.verify_proof(&proof, &public_inputs(leaf_commitment, root)) {
+        return false;
+    }
+    let proof_hash = keccak256(&proof);
+    let leaf_nullifier = derive_nullifier(leaf_commitment);
+    if host.is_nullifier_used(leaf_nullifier) {
+        return false;
+    }
+    host.mark_nullifier_used(leaf_nullifier);
+    let timestamp = host.block_timestamp();
+    host.emit_privacy_transaction(&PrivacyTransactionRecord {
+        circuit: B256::new(CIRCUIT_ID),
+        nullifier: leaf_nullifier,
+        commitment: leaf_commitment,
+        merkle_root: root,
+        proof_hash,
+        timestamp,
+    });
+    true
+}
+
+/// Reference Stylus embedding — copy into a dedicated contract crate.
+///
+/// Gated behind a feature this workspace never enables: `stylus-sdk` only
+/// compiles for the Stylus WASM target. The module is parse-checked and
+/// snapshot-locked, not type-checked. To deploy it, create a contract crate
+/// (stylus-sdk = "0.9.0", alloy-primitives = "=0.8.20"; see `contracts/` for
+/// the layout) and move this module there.
+#[cfg(feature = "zerostyl-stylus-contract")]
+pub mod stylus_contract {
+    use super::*;
+    use stylus_sdk::{alloy_primitives::U256, alloy_sol_types::sol, evm, prelude::*};
+
+    sol! {
+        /// Standardized privacy-transaction event; signature matches
+        /// [`ZEROSTYL_PRIVACY_TX_SIGNATURE`].
+        event ZeroStylPrivacyTransaction(
+            bytes32 indexed circuit,
+            bytes32 indexed nullifier,
+            bytes32 indexed commitment,
+            bytes32 merkle_root,
+            bytes32 proof_hash,
+            uint256 timestamp
+        );
+    }
+
+    sol_storage! {
+        #[entrypoint]
+        pub struct ClaimContract {
+            /// One-shot nullifier registry.
+            mapping(bytes32 => bool) used_nullifiers;
+        }
+    }
+
+    impl super::ClaimHost for ClaimContract {
+        fn is_nullifier_used(&self, nullifier: B256) -> bool {
+            self.used_nullifiers.get(nullifier)
+        }
+
+        fn mark_nullifier_used(&mut self, nullifier: B256) {
+            self.used_nullifiers.setter(nullifier).set(true);
+        }
+
+        fn block_timestamp(&self) -> u64 {
+            self.vm().block_timestamp()
+        }
+
+        fn emit_privacy_transaction(&mut self, record: &PrivacyTransactionRecord) {
+            #[allow(deprecated)]
+            evm::log(ZeroStylPrivacyTransaction {
+                circuit: record.circuit,
+                nullifier: record.nullifier,
+                commitment: record.commitment,
+                merkle_root: record.merkle_root,
+                proof_hash: record.proof_hash,
+                timestamp: U256::from(record.timestamp),
+            });
+        }
+    }
+
+    #[public]
+    impl ClaimContract {
+        pub fn claim(
+            &mut self,
+            leaf_commitment: B256,
+            root: B256,
+            proof: stylus_sdk::abi::Bytes,
+        ) -> bool {
+            super::claim(self, leaf_commitment, root, proof.0.into())
+        }
+    }
 }

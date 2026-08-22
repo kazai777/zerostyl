@@ -23,7 +23,7 @@ const VERSION: &str = "1.0.0";
 const DESCRIPTION: &str =
     "Private token transfer: balance conservation + Poseidon commitments + Merkle membership.";
 const DEFAULT_K: u32 = 14;
-const NUM_PUBLIC_INPUTS: usize = 3;
+const NUM_PUBLIC_INPUTS: usize = 4;
 const NUM_PRIVATE_WITNESSES: usize = 6;
 
 #[derive(Debug, Deserialize)]
@@ -118,6 +118,15 @@ fn public_inputs_schema_static() -> &'static PublicInputsSchema {
                 kind: FieldType::Fp,
                 description: Some("Account-set Merkle root containing commitment_old.".into()),
             },
+            PublicInputField {
+                name: "nullifier".into(),
+                kind: FieldType::Fp,
+                description: Some(
+                    "Poseidon(randomness_old, balance_old): deterministic per spent note, \
+                     unlinkable to commitment_old; consumed on-chain to prevent double-spends."
+                        .into(),
+                ),
+            },
         ],
     })
 }
@@ -197,6 +206,7 @@ fn build_inputs(w: &WitnessJson) -> Result<ParsedInputs> {
     let commitment_new =
         TxPrivacyCircuit::compute_commitment(Fr::from(balance_new), randomness_new);
     let merkle_root = TxPrivacyCircuit::compute_merkle_root(commitment_old, &siblings, &indices);
+    let nullifier = TxPrivacyCircuit::compute_nullifier(Fr::from(balance_old), randomness_old);
 
     let circuit = TxPrivacyCircuit::from_raw(
         balance_old,
@@ -210,7 +220,7 @@ fn build_inputs(w: &WitnessJson) -> Result<ParsedInputs> {
 
     Ok(ParsedInputs {
         circuit,
-        public_inputs: vec![vec![commitment_old, commitment_new, merkle_root]],
+        public_inputs: vec![vec![commitment_old, commitment_new, merkle_root, nullifier]],
     })
 }
 
@@ -441,7 +451,7 @@ mod tests {
         let d = descriptor();
         assert_eq!(d.name(), "tx_privacy");
         assert_eq!(d.default_k(), 14);
-        assert_eq!(d.num_public_inputs(), 3);
+        assert_eq!(d.num_public_inputs(), 4);
         assert_eq!(d.num_private_witnesses(), 6);
     }
 
@@ -462,11 +472,11 @@ mod tests {
     }
 
     #[test]
-    fn public_inputs_schema_has_three_fields() {
+    fn public_inputs_schema_has_four_fields() {
         let schema = descriptor().public_inputs_schema();
-        assert_eq!(schema.fields.len(), 3);
+        assert_eq!(schema.fields.len(), 4);
         let names: Vec<&str> = schema.fields.iter().map(|f| f.name.as_str()).collect();
-        assert_eq!(names, vec!["commitment_old", "commitment_new", "merkle_root"]);
+        assert_eq!(names, vec!["commitment_old", "commitment_new", "merkle_root", "nullifier"]);
     }
 
     #[test]

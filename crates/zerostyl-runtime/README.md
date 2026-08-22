@@ -1,69 +1,59 @@
 # zerostyl-runtime
 
-Shared runtime utilities and types for the ZeroStyl toolkit.
+Shared, `no_std` runtime types for the [ZeroStyl](https://github.com/kazai777/zerostyl) privacy
+toolkit on Arbitrum Stylus: proof/commitment types, a standardized privacy-transaction event, and
+bytecode fingerprinting.
 
 ## Installation
 
 ```toml
 [dependencies]
 zerostyl-runtime = "0.1.0"
+# For a Stylus contract / wasm32 target:
+# zerostyl-runtime = { version = "0.1.0", default-features = false }
 ```
 
-## Quick Example
+The crate is `no_std` (only `alloc` is required). The default `std` feature adds `std::io` error
+interop; disable it for on-chain / wasm builds.
+
+## Quick example
 
 ```rust
-use zerostyl_runtime::{ZkProof, Commitment, CircuitConfig, HashType};
+use zerostyl_runtime::{BytecodeFingerprint, ZeroStylPrivacyTransaction, ZkProof};
 
-// Create a zero-knowledge proof (minimum 32 bytes)
+// Validate a proof blob (minimum size enforced).
 let proof = ZkProof::new(vec![0u8; 192]).unwrap();
-println!("Proof size: {} bytes", proof.size());
 
-// Create a cryptographic commitment
-let commitment = Commitment::new(
-    vec![100, 200],        // value to commit
-    vec![0u8; 32],         // randomness (min 32 bytes)
-    HashType::Pedersen     // hash function
-).unwrap();
+// Fingerprint the circuit / contract bytecode (keccak256).
+let circuit = BytecodeFingerprint::of(b"...contract wasm bytes...");
+println!("circuit = {}", circuit.to_hex());
 
-// Configure a circuit (k must be in range [4, 28])
-let mut config = CircuitConfig::minimal(17).unwrap(); // 2^17 = 131,072 rows
-config.add_param("max_transfers".to_string(), "10".to_string());
-println!("Circuit has {} rows", config.num_rows());
+// The standardized event every ZeroStyl contract emits. `topic0()` is the EVM log topic
+// (keccak256 of the canonical signature) that indexers filter on.
+let _sig = ZeroStylPrivacyTransaction::SIGNATURE;
+let _topic0 = ZeroStylPrivacyTransaction::topic0();
 ```
 
-## Features
+## What it provides
 
-- Core types used across all ZeroStyl components
-- Input validation with security constraints
-- Serialization support (JSON via serde)
-- Comprehensive error handling with `ZeroStylError`
-- Type-safe circuit configuration
+- **`ZeroStylPrivacyTransaction`** — the canonical privacy-transaction event (circuit fingerprint,
+  nullifier, commitment, merkle root, proof hash, timestamp). Single source of truth for the event
+  schema and its EVM `topic0`, shared by every ZeroStyl contract and off-chain indexer. Carries no
+  private witness data.
+- **`BytecodeFingerprint`** — a keccak256 digest of contract bytecode / verifying key, giving a
+  stable on-chain-comparable "which circuit produced this proof" identifier.
+- **Core types** — `ZkProof`, `CommitmentHash`, `MerkleRoot`, `MerklePath`, `RangeProofConfig`,
+  `CircuitConfig`, all with input validation.
+- **`ZeroStylError` / `Result`** — the shared error type (the `IoError` variant is `std`-only).
+- **`DEV_SRS_SEED`** — the fixed development KZG SRS seed shared by the prover and the on-chain
+  verifier (reproducible dev setup, not a ceremony).
 
-## Types
+## Validation constraints
 
-### Core Types
-- **`ZkProof`**: Zero-knowledge SNARK proof (min 32 bytes)
-- **`Commitment`**: Cryptographic commitment with configurable hash
-- **`CircuitConfig`**: halo2 circuit configuration with validation
-- **`ZeroStylError`**: Unified error type with detailed messages
-
-### Supporting Types
-- **`HashType`**: Pedersen or Poseidon hash functions
-- **`LookupTable`**: SHA256 and Pedersen lookup tables
-- **`CustomGate`**: PedersenHash and MerklePathGate
-
-## Validation Constraints
-
-- `ZkProof`: Minimum 32 bytes
-- `Commitment`: Randomness minimum 32 bytes, non-empty value
-- `CircuitConfig`: k must be in range [4, 28] (halo2 requirement)
-
-## Part of ZeroStyl Toolkit
-
-This crate is part of the [ZeroStyl privacy toolkit](https://github.com/kazai777/zerostyl) for Arbitrum Stylus.
-
-See the main repository for complete documentation.
+- `ZkProof`: minimum 32 bytes.
+- `MerklePath`: non-empty, matching siblings/indices lengths.
+- `CircuitConfig`: `k` within halo2's supported range.
 
 ## License
 
-MIT - See [LICENSE](../../LICENSE) for details
+MIT — see [LICENSE](../../LICENSE).

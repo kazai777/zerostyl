@@ -21,6 +21,13 @@
           "type": "fp"
         },
         "name": "merkle_root"
+      },
+      {
+        "description": "Poseidon(randomness_old, balance_old): deterministic per spent note, unlinkable to commitment_old; consumed on-chain to prevent double-spends.",
+        "kind": {
+          "type": "fp"
+        },
+        "name": "nullifier"
       }
     ]
   },

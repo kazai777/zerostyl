@@ -7,17 +7,35 @@ license = "MIT"
 publish = false
 
 [dependencies]
-zerostyl-circuits = { path = "../../crates/zerostyl-circuits" }
-zerostyl-compiler = { path = "../../crates/zerostyl-compiler" }
-zerostyl-runtime = { path = "../../crates/zerostyl-runtime" }
-halo2_proofs = { version = "=0.3.0", features = ["dev-graph"] }
-halo2curves = "0.6"
-ff = "0.13"
-group = "0.13"
-rand = "0.8"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-hex = "0.4"
+# Circuit-only dependencies (no_std / wasm-compatible).
+zerostyl-gadgets = { path = "../../crates/zerostyl-gadgets" }
+halo2_proofs = { version = "=0.3.0", default-features = false, features = ["bits"] }
+halo2curves = { version = "0.6", default-features = false, features = ["bits"] }
+
+# std-only: the CircuitDescriptor (prover, witness JSON, MockProver reporting) lives behind the
+# `std` feature so the circuit itself can be compiled for wasm32 without pulling the full compiler.
+zerostyl-circuits = { path = "../../crates/zerostyl-circuits", optional = true }
+zerostyl-compiler = { path = "../../crates/zerostyl-compiler", optional = true }
+zerostyl-runtime = { path = "../../crates/zerostyl-runtime", optional = true }
+serde = { version = "1.0", features = ["derive"], optional = true }
+serde_json = { version = "1.0", optional = true }
+hex = { version = "0.4", optional = true }
+
+# On wasm32 a transitive dependency pulls getrandom; the `custom` feature lets the rlib build.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", default-features = false, features = ["custom"] }
+
+[features]
+default = ["std"]
+std = [
+    "dep:zerostyl-circuits",
+    "dep:zerostyl-compiler",
+    "dep:zerostyl-runtime",
+    "dep:serde",
+    "dep:serde_json",
+    "dep:hex",
+    "halo2_proofs/dev-graph",
+]
 
 [dev-dependencies]
 criterion = "0.5"

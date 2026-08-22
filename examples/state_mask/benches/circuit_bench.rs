@@ -14,7 +14,12 @@ fn benchmark_state_mask_circuit(c: &mut Criterion) {
     let circuit =
         StateMaskCircuit::new(state_value, nonce, collateral_ratio, hidden_balance, threshold);
 
-    let commitment = StateMaskCircuit::compute_commitment(Fp::from(state_value), nonce);
+    let commitment = StateMaskCircuit::compute_commitment(
+        Fp::from(state_value),
+        Fp::from(collateral_ratio),
+        Fp::from(hidden_balance),
+        nonce,
+    );
     let public_inputs = vec![commitment, Fp::from(threshold)];
 
     c.bench_function("state_mask_circuit_prove", |b| {

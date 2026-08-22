@@ -1,10 +1,11 @@
 //! Halo2-KZG-BN254 proof verification entry points for ZeroStyl circuits.
 //!
-//! This is the legacy verifier crate that ZeroStyl used to embed inside a
-//! per-circuit Stylus binary. The Bloc 0 universal verifier replaces this
-//! path with a single Stylus router that staticcalls SP1's deployed
-//! Groth16 verifier. The functions here remain to keep the workspace
-//! coherent and to support older tooling that wraps proofs directly.
+//! Std-only convenience wrappers that verify a proof against the embedded params + serialized
+//! verifying key (see [`crate::embedded`]). `verify_halo2_proof` decodes postcard-encoded public
+//! inputs and calls the real halo2 SHPLONK verifier; it currently targets the built-in
+//! [`crate::reference_circuit::ReferenceCircuit`]. Verifying a user circuit (tx_privacy,
+//! state_mask, …) uses the same mechanism with that circuit's own serialized VK + params
+//! embedded the same way.
 
 use halo2_proofs::{
     plonk::{verify_proof, VerifyingKey},

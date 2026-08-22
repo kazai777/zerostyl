@@ -154,9 +154,16 @@ fn build_circuit(w: &WitnessJson) -> Result<StateMaskCircuit> {
 fn derive_public_inputs(w: &WitnessJson) -> Result<Vec<Vec<Fr>>> {
     let state_value = parse_u64(&w.state_value, "state_value")?;
     let nonce = parse_field(&w.nonce)?;
+    let collateral_ratio = parse_u64(&w.collateral_ratio, "collateral_ratio")?;
+    let hidden_balance = parse_u64(&w.hidden_balance, "hidden_balance")?;
     let threshold = parse_u64(&w.threshold, "threshold")?;
 
-    let mut commitment = StateMaskCircuit::compute_commitment(Fr::from(state_value), nonce);
+    let mut commitment = StateMaskCircuit::compute_commitment(
+        Fr::from(state_value),
+        Fr::from(collateral_ratio),
+        Fr::from(hidden_balance),
+        nonce,
+    );
     let mut threshold_fp = Fr::from(threshold);
 
     if let Some(dbg) = &w.debug {
