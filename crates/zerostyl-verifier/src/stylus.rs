@@ -2,9 +2,15 @@
 //!
 //! This module provides the Stylus contract interface for on-chain proof verification.
 //!
-//! When deployed with the `embedded_vk` feature, the contract can verify proofs
-//! against the embedded reference circuit. The VK is regenerated at runtime from
-//! embedded IPA parameters because halo2_proofs 0.3.2 lacks VK serialization.
+//! When deployed with the `embedded_vk` feature, the contract verifies proofs against the
+//! embedded reference circuit, reading the KZG params + serialized VK that were baked in at build
+//! time (no runtime `keygen_vk`).
+//!
+//! Caveat: this entrypoint pulls in the full halo2 SHPLONK verifier. It compiles for
+//! `wasm32-unknown-unknown`, but its size and gas cost have not been shown to fit Arbitrum
+//! Stylus limits — the deployed demo contracts still record a proof hash rather than calling this
+//! path (see `contracts/CONTRACTS.md`). Treat it as the reference verification path, not a
+//! production-ready on-chain verifier.
 
 use stylus_sdk::{abi::Bytes, prelude::*};
 
