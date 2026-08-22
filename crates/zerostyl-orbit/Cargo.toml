@@ -1,25 +1,25 @@
 [package]
 name = "zerostyl-orbit"
-version = "0.1.0"
-edition = "2021"
-authors = ["kazai777 <kazai777.dev@gmail.com>"]
-license = "MIT"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
 description = "Orbit zk-Adapter: per-chain gas/precompile/size profiles and deployability analysis for ZeroStyl on Arbitrum Orbit chains"
-repository = "https://github.com/kazai777/zerostyl"
 keywords = ["arbitrum", "stylus", "orbit", "zero-knowledge", "privacy"]
 categories = ["cryptography", "development-tools"]
 
 [dependencies]
 zerostyl-circuits = { path = "../zerostyl-circuits" }
-serde = { version = "1.0", features = ["derive"] }
+serde = { workspace = true, features = ["std"] }
 toml = "0.8"
-thiserror = "1.0"
-clap = { version = "4.5", features = ["derive"] }
-anyhow = "1.0"
+thiserror = { workspace = true, features = ["std"] }
+clap = { workspace = true }
+anyhow = { workspace = true }
 brotli = "3"
 
 [dev-dependencies]
-tempfile = "3.0"
+tempfile = { workspace = true }
 
 [lib]
 name = "zerostyl_orbit"

@@ -1,10 +1,11 @@
 [package]
 name = "zerostyl-verifier"
-version = "0.1.0"
-edition = "2021"
-authors = ["kazai777 <kazai777.dev@gmail.com>"]
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
 description = "WASM verifier for ZeroStyl circuits on Arbitrum Stylus"
-license = "MIT"
+license.workspace = true
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -16,7 +17,7 @@ halo2_proofs = { version = "=0.3.0", default-features = false }
 halo2curves = { version = "0.6", default-features = false, features = ["bits"] }
 
 # Serialization - no_std compatible
-serde = { version = "1.0", default-features = false, features = ["derive", "alloc"] }
+serde = { workspace = true, features = ["alloc"] }
 postcard = { version = "1.1", default-features = false, features = ["alloc"] }
 
 # Cryptography (no_std compatible)
@@ -50,7 +51,7 @@ zerostyl-runtime = { path = "../zerostyl-runtime" }
 state_mask = { path = "../../examples/state_mask", optional = true, default-features = false }
 
 [dev-dependencies]
-tempfile = "3.0"
+tempfile = { workspace = true }
 rand = "0.8"
 # For the state_mask interop test: the descriptor (real prover) needs state_mask's std feature and
 # the CircuitDescriptor trait. Feature unification gives the test builds the std descriptor while

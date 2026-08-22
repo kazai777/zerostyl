@@ -1,11 +1,11 @@
 [package]
 name = "zerostyl-gadgets"
-version = "0.1.0"
-edition = "2021"
-authors = ["kazai777 <kazai777.dev@gmail.com>"]
-license = "MIT"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
 description = "no_std halo2 circuit gadgets (Poseidon, Merkle, range, comparison) for ZeroStyl privacy circuits"
-repository = "https://github.com/kazai777/zerostyl"
 keywords = ["halo2", "zero-knowledge", "poseidon", "merkle", "zk-snarks"]
 categories = ["cryptography", "no-std"]
 

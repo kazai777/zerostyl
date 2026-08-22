@@ -24,6 +24,8 @@ Rust toolkit for building and debugging privacy-preserving smart contracts on Ar
 | `zerostyl-exporter` | ✅ Working | `#[zk_private]` → circuit + descriptor + privacy-safe ABI + `abi.json` |
 | `zerostyl-sdk` (Rust) | ✅ Working | Registry, prove/verify, witness building, ABI loading, proof envelope |
 | SDKs (TS / Python) | ✅ Working | `abi.json` → typed bindings ([`packages/sdk-ts`](packages/sdk-ts), [`packages/sdk-py`](packages/sdk-py)) |
+| `zerostyl-orbit` | ✅ Working | Per-chain size/gas/precompile profiles + deployability analysis ([`crates/zerostyl-orbit`](crates/zerostyl-orbit)) |
+| Technical dashboard | ✅ Working | Event schema + `topic0`, live keccak256 fingerprint tool, deployed registry — on the [website](https://zerostyl.dev/dashboard) |
 
 ---
 
@@ -137,7 +139,7 @@ cargo fmt --all
 
 ## Adding your own circuit
 
-ZeroStyl is plug-in by design: implement the `CircuitDescriptor` trait, register it with one line, and the CLI, debugger, and (soon) ABI exporter all pick it up automatically. See [docs/EXTENDING.md](docs/EXTENDING.md) for the five-step recipe and [`examples/example_demo/`](examples/example_demo/) for the minimal template.
+ZeroStyl is plug-in by design: implement the `CircuitDescriptor` trait, register it with one line, and the CLI, debugger, and ABI exporter all pick it up automatically. See [docs/EXTENDING.md](docs/EXTENDING.md) for the five-step recipe and [`examples/example_demo/`](examples/example_demo/) for the minimal template.
 
 ---
 
@@ -149,7 +151,7 @@ Three SDKs consume the exporter's `abi.json`:
 - **TypeScript** — `@zerostyl/sdk-ts` (in [`packages/sdk-ts/`](packages/sdk-ts/)): turns `abi.json` into a typed TypeScript module your dApp can import.
 - **Python** — `zerostyl-sdk` (in [`packages/sdk-py/`](packages/sdk-py/)): typed dataclasses + bindings codegen, pure Python. See [`packages/sdk-py/README.md`](packages/sdk-py/README.md).
 
-None of the packages are published yet (crates.io / npm / PyPI) — use them from a clone of this monorepo for now:
+The packages are not published to crates.io / npm / PyPI — use them from a clone of this monorepo:
 
 ```bash
 # TypeScript
@@ -165,6 +167,16 @@ zerostyl-sdk-py generate --abi examples/zk_private_demo/abi.json
 ```
 
 Proof generation from TS/Python (prover bindings) and on-chain submission helpers land in subsequent releases. See [`packages/sdk-ts/README.md`](packages/sdk-ts/README.md) for the TS reference and roadmap.
+
+---
+
+## Further reading
+
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — system design, proof system, size constraints.
+- [docs/EXTENDING.md](docs/EXTENDING.md) — add your own circuit (manual or `#[zk_private]`).
+- [docs/STARK_FEASIBILITY.md](docs/STARK_FEASIBILITY.md) — zk-STARKs feasibility: why halo2-KZG is the current choice, and when a post-quantum STARK backend would make sense.
+- [contracts/CONTRACTS.md](contracts/CONTRACTS.md) — deployed contracts and the honest on-chain verification model.
+- [CHANGELOG.md](CHANGELOG.md) and [docs/RELEASING.md](docs/RELEASING.md) — versioning policy and release/publish process.
 
 ---
 
