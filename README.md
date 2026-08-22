@@ -20,7 +20,10 @@ Rust toolkit for building and debugging privacy-preserving smart contracts on Ar
 | `zerostyl-prove` | ✅ Working | CLI — generate and verify halo2 proofs off-chain |
 | `zerostyl-verifier` | ✅ Working | Verify proofs on-chain (Stylus-ready, no-std) |
 | Circuits (3) | ✅ Working | `tx_privacy`, `state_mask`, `private_vote` |
-| `zerostyl-exporter` | 🔜 Planned | ABI exporter for Stylus contracts |
+| `zerostyl-gadgets` | ✅ Working | `no_std`/wasm32 halo2 gadgets (Poseidon, range, comparison, Merkle) |
+| `zerostyl-exporter` | ✅ Working | `#[zk_private]` → circuit + descriptor + privacy-safe ABI + `abi.json` |
+| `zerostyl-sdk` (Rust) | ✅ Working | Registry, prove/verify, witness building, ABI loading, proof envelope |
+| SDKs (TS / Python) | ✅ Working | `abi.json` → typed bindings ([`packages/sdk-ts`](packages/sdk-ts), [`packages/sdk-py`](packages/sdk-py)) |
 
 ---
 
@@ -138,21 +141,30 @@ ZeroStyl is plug-in by design: implement the `CircuitDescriptor` trait, register
 
 ---
 
-## TypeScript SDK
+## SDKs
 
-`@zerostyl/sdk-ts` (in [`packages/sdk-ts/`](packages/sdk-ts/)) turns a circuit's `abi.json` into a typed TypeScript module your dApp can import.
+Three SDKs consume the exporter's `abi.json`:
 
-The package isn't on npm yet — use it from a clone of this monorepo for now:
+- **Rust** — `zerostyl-sdk` (in [`crates/zerostyl-sdk/`](crates/zerostyl-sdk/)): the full client — circuit registry, `prove`/`verify`/`mock_prove`, witness building, ABI loading, and the canonical proof envelope. See [`crates/zerostyl-sdk/README.md`](crates/zerostyl-sdk/README.md).
+- **TypeScript** — `@zerostyl/sdk-ts` (in [`packages/sdk-ts/`](packages/sdk-ts/)): turns `abi.json` into a typed TypeScript module your dApp can import.
+- **Python** — `zerostyl-sdk` (in [`packages/sdk-py/`](packages/sdk-py/)): typed dataclasses + bindings codegen, pure Python. See [`packages/sdk-py/README.md`](packages/sdk-py/README.md).
+
+None of the packages are published yet (crates.io / npm / PyPI) — use them from a clone of this monorepo for now:
 
 ```bash
+# TypeScript
 pnpm install
 pnpm --filter @zerostyl/sdk-ts build
 node packages/sdk-ts/bin/zerostyl-sdk.js generate \
   --abi examples/zk_private_demo/abi.json \
   --out /tmp/circuit.ts
+
+# Python
+python -m pip install "packages/sdk-py[dev]"
+zerostyl-sdk-py generate --abi examples/zk_private_demo/abi.json
 ```
 
-The npm publish workflow + the WASM bundle of the prover + on-chain submission helpers land in subsequent releases. See [`packages/sdk-ts/README.md`](packages/sdk-ts/README.md) for the full reference and roadmap.
+Proof generation from TS/Python (prover bindings) and on-chain submission helpers land in subsequent releases. See [`packages/sdk-ts/README.md`](packages/sdk-ts/README.md) for the TS reference and roadmap.
 
 ---
 

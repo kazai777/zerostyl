@@ -15,7 +15,7 @@ The minimal template is [`examples/example_demo/`](../examples/example_demo). Re
 
 ### 1. Write your halo2 circuit
 
-Create a crate (or add a module to an existing one) and implement `halo2_proofs::plonk::Circuit<Fp>`:
+Create a crate (or add a module to an existing one) and implement `halo2_proofs::plonk::Circuit<Fr>`:
 
 ```rust
 // my_circuit/src/lib.rs
@@ -23,21 +23,21 @@ use halo2_proofs::{
     circuit::{Layouter, SimpleFloorPlanner, Value},
     plonk::{Circuit, ConstraintSystem, Error},
 };
-use halo2curves::pasta::Fp;
+use halo2curves::bn256::Fr;
 
 #[derive(Clone, Default)]
 pub struct MyCircuit {
-    pub a: Value<Fp>,
-    pub b: Value<Fp>,
+    pub a: Value<Fr>,
+    pub b: Value<Fr>,
 }
 
-impl Circuit<Fp> for MyCircuit {
+impl Circuit<Fr> for MyCircuit {
     type Config = /* your config */;
     type FloorPlanner = SimpleFloorPlanner;
 
     fn without_witnesses(&self) -> Self { Self::default() }
-    fn configure(meta: &mut ConstraintSystem<Fp>) -> Self::Config { /* … */ }
-    fn synthesize(&self, config: Self::Config, layouter: impl Layouter<Fp>) -> Result<(), Error> {
+    fn configure(meta: &mut ConstraintSystem<Fr>) -> Self::Config { /* … */ }
+    fn synthesize(&self, config: Self::Config, layouter: impl Layouter<Fr>) -> Result<(), Error> {
         /* … */
     }
 }
@@ -56,7 +56,7 @@ use std::sync::OnceLock;
 
 use halo2_proofs::dev::MockProver;
 use halo2_proofs::plonk::Circuit;
-use halo2curves::pasta::Fp;
+use halo2curves::bn256::Fr;
 use serde::Deserialize;
 use zerostyl_circuits::{
     CircuitDescriptor, CircuitError, CircuitIntrospection, FieldType, FieldVisibility,
@@ -150,7 +150,7 @@ cargo run -- generate --circuit my_circuit --witnesses my_witness.json
 cargo run --bin zerostyl-debug -- debug --circuit my_circuit --witnesses bad.json
 ```
 
-That's it. Your circuit is now indistinguishable from the built-ins — same CLI, same debugger, same schemas, same exporter (M3 bloc A) once it lands.
+That's it. Your circuit is now indistinguishable from the built-ins — same CLI, same debugger, same schemas, same exporter.
 
 ---
 
@@ -173,7 +173,7 @@ In addition, `zerostyl-export schema --circuit my_circuit` serializes your descr
 
 ## Faster path: `#[zk_private]` annotations
 
-Instead of writing the halo2 circuit by hand, annotate the params you want to hide on your Stylus function. `zerostyl-export transform` parses the source, composes a halo2 circuit from the M1 gadgets (Poseidon, range, comparison, Merkle), and writes four artifacts in one shot.
+Instead of writing the halo2 circuit by hand, annotate the params you want to hide on your Stylus function. `zerostyl-export transform` parses the source, composes a halo2 circuit from the built-in gadgets (Poseidon, range, comparison, Merkle), and writes four artifacts in one shot.
 
 ### Supported attributes
 
@@ -216,14 +216,36 @@ zerostyl-export transform --contract contract_source.rs
 
 You get four artifacts in `./generated/`:
 
-- **`circuit.rs`** — a halo2 `Circuit<Fp>` impl that wires `PoseidonCommitmentChip`, `RangeProofChip`, and `ComparisonChip` according to the attributes. Witnesses: `collateral`, `collateral_nonce`, `threshold`.
+- **`circuit.rs`** — a halo2 `Circuit<Fr>` impl that wires `PoseidonCommitmentChip`, `RangeProofChip`, and `ComparisonChip` according to the attributes. Witnesses: `collateral`, `collateral_nonce`, `threshold`.
 - **`descriptor.rs`** — a `CircuitDescriptor` impl with `prove` / `verify` / `mock_prove` / `inspect` implemented against `NativeProver` and `MockProver`. Also re-exposes `pub fn descriptor() -> &'static dyn CircuitDescriptor` so it slots into `register_circuit!`.
-- **`contract_transformed.rs`** — the privacy-safe ABI:
+- **`contract_transformed.rs`** — the privacy-safe ABI. Each `#[zk_private]` param becomes a
+  `B256` commitment (plus a `B256` Merkle root param when the attribute uses `merkle_member`),
+  and a trailing `proof: Bytes` carries the proof:
   ```rust
-  pub fn deposit(collateral_commitment: B256, threshold: u64, proof: Bytes) -> bool {
-      todo!()  // verifier wiring lands with the universal on-chain verifier
-  }
+  pub fn deposit(
+      host: &mut impl DepositHost,
+      collateral_commitment: B256,
+      threshold: u64,
+      proof: Bytes,
+  ) -> bool { /* guards → nullifier registry → standardized event */ }
   ```
+  The generated module is self-contained (only `alloy-primitives` needed) and ships:
+  - a `{Fn}Host` trait — the embedding contract provides nullifier storage, the block
+    timestamp, the event sink, and a `verify_proof` hook (**fails closed** by default: returns
+    `false` so an unconfigured contract rejects everything; you MUST override it to call a real
+    verifier such as `zerostyl-verifier` before it accepts anything);
+  - `public_inputs(...)` returning the 32-byte little-endian field representations in circuit
+    order, `derive_nullifier` (a per-commitment keccak256 replay guard over `commitment` alone,
+    so a commitment can be accepted only once — not an unlinkable circuit nullifier), and the
+    `ZeroStylPrivacyTransaction` constants (`SIGNATURE`, precomputed `topic0`, `CIRCUIT_ID`)
+    inlined from `zerostyl-runtime` at generation time;
+  - a reference Stylus embedding (`sol!` event + `sol_storage!` nullifier mapping +
+    `#[public]` impl) inside a `#[cfg(feature = "zerostyl-stylus-contract")]` module. That cfg is
+    a **marker for the destination contract crate**, not a feature you enable in place: the
+    module needs `stylus-sdk` (which the example crate does not depend on), so it is
+    parse-checked and snapshot-locked but never type-checked here. Copy it into a dedicated
+    contract crate (stylus-sdk 0.9, which declares the `zerostyl-stylus-contract` feature) to
+    build it for the Stylus target.
 - **`abi.json`** — the canonical `AbiSchema` describing the witness fields, public inputs, and proof metadata. Same shape SDK generators consume.
 
 ### Integrating the generated artifacts
@@ -248,13 +270,22 @@ register_circuit!(registry, my_demo)?;
 
 The end-to-end reference is [`examples/zk_private_demo/`](../examples/zk_private_demo) — `contract_source.rs` + generated artifacts + a `tests/mock_prove.rs` that exercises the full pipeline.
 
+### Consuming the ABI
+
+`abi.json` is the language-neutral contract between the exporter and downstream tooling. Three SDKs consume it:
+
+- **Rust** ([`crates/zerostyl-sdk/`](../crates/zerostyl-sdk/)) — registry + `prove`/`verify`/`mock_prove`, `WitnessBuilder`, ABI loading/validation, canonical proof envelope.
+- **TypeScript** ([`packages/sdk-ts/`](../packages/sdk-ts/)) — `zerostyl-sdk generate --abi abi.json` emits typed bindings for the browser/Node.
+- **Python** ([`packages/sdk-py/`](../packages/sdk-py/)) — `zerostyl-sdk-py generate --abi abi.json` emits typed dataclasses.
+
 ### Limitations
 
 - **One `commit = "poseidon"` per circuit.** The chip column layout doesn't accommodate multiple commits cleanly yet. Split into separate circuits if you need more than one.
 - **MerkleMember requires a Poseidon commit on the same param.** The tree leaf is the commitment.
 - **Equality comparison is not exposed** by `ComparisonChip`. Use a different gadget (or the manual path) when you need `value == other`.
 - **No body inference.** ZeroStyl reads only the attribute declarations — the function body is ignored. Anything not expressible via the supported attributes requires the manual path.
-- **The generated `contract_transformed.rs` body is `todo!()`.** Universal on-chain verifier wiring lands in a later milestone; until then, the transformed ABI is a stub.
+- **The source function must return `bool` or `Result<bool, Vec<u8>>`.** Other return types are rejected by the transform.
+- **Proofs are not verified on-chain by the generated contract.** Arbitrum Stylus caps deployable contracts at 24 KB Brotli-compressed while the halo2 KZG verifier alone exceeds 90 KB, so the generated flow is a hash-guard (proof hash + one-shot nullifier + standardized event) with `{Fn}Host::verify_proof` as the extension point for real verification.
 
 ---
 
@@ -275,7 +306,7 @@ The end-to-end reference is [`examples/zk_private_demo/`](../examples/zk_private
 
 **`thread 'main' panicked at ... left != right`** — your circuit's `Circuit::synthesize` is panicking on the witness. Run with `--bin zerostyl-debug debug` to surface the failing constraint structurally.
 
-**Slow first run, fast after** — `NativeProver::setup` caches IPA parameters and keys under `.zerostyl_cache/` (~few MB per `k`). Delete the directory to force regeneration.
+**Slow first run, fast after** — `NativeProver::setup` caches the KZG parameters under `.zerostyl_cache/` (~few MB per `k`; the file name includes the SRS seed). Delete the directory to force regeneration.
 
 ---
 
