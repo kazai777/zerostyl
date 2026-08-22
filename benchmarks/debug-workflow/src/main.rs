@@ -1,16 +1,17 @@
 //! Output quality comparison: raw halo2 vs ZeroStyl
 //!
-//! This is NOT a timing benchmark (use `cargo bench -p zerostyl-debugger` for that).
-//! This tool measures DETERMINISTIC output quality metrics on real circuits with real
-//! broken witnesses. All metrics are reproducible — no timing or system noise involved.
+//! This is NOT a timing benchmark. It measures DETERMINISTIC output-quality metrics by diffing
+//! raw halo2 `{:#?}` failure output against the ZeroStyl debugger's `format_mock_prover_report`
+//! text output, on real circuits with real broken witnesses. All metrics are reproducible — no
+//! timing or system noise involved.
 //!
 //! Metrics measured:
-//!   - Lines of output
+//!   - Lines / characters of output
 //!   - Structural noise lines (only braces/commas — zero information content)
 //!   - Max struct nesting depth (depth of `{[( ` nesting)
-//!   - Characters before the gate name appears (time-to-diagnosis proxy)
-//!   - Average characters per cell value reference
-//!   - Gate name visible at top level (yes/no)
+//!   - Characters before the gate name appears in the failure section (time-to-diagnosis proxy)
+//!   - Characters spent on the failing cell values / diagnosis
+//!   - Gate name visible near the top of the failure section (yes/no)
 //!
 //! Usage:
 //!   cargo run -p debug-workflow-bench --release
@@ -73,71 +74,60 @@ fn max_nesting_depth(s: &str) -> usize {
     max_depth
 }
 
-/// Characters from the start of the FAILURE section before the gate name appears.
+/// Start offset of the FAILURE section in either output.
 ///
-/// For raw halo2 the failure section starts at `ConstraintNotSatisfied {`.
-/// For ZeroStyl it starts at `FAILED:`.
+/// Raw halo2 (`{:#?}`) begins the section at `ConstraintNotSatisfied`; the ZeroStyl text report
+/// (see `zerostyl-debugger`'s `format_mock_prover_report`) begins each failure with
+/// `--- Failure N [...] ---`.
+fn failure_section_start(s: &str) -> usize {
+    s.find("ConstraintNotSatisfied").or_else(|| s.find("--- Failure")).unwrap_or(0)
+}
+
+/// Characters from the start of the FAILURE section before the gate name appears.
 ///
 /// This isolates the "time to diagnosis" within the error itself, ignoring
 /// the ZeroStyl stats header which comes before the failure section.
 fn chars_to_gate_name_in_failure(s: &str, gate_name: &str) -> usize {
-    let failure_start = s.find("ConstraintNotSatisfied").or_else(|| s.find("FAILED:")).unwrap_or(0);
-    let from_failure = &s[failure_start..];
+    let from_failure = &s[failure_section_start(s)..];
     from_failure.find(gate_name).unwrap_or(from_failure.len())
 }
 
-/// Total characters used to represent ALL cell values in the error output.
+/// Characters used to convey the failing cell values / diagnosis.
 ///
-/// For raw halo2, each cell value is a multi-line `VirtualCell { … }` block
-/// spanning ~10 lines and ~150 characters.
-/// For ZeroStyl, each cell value is a single line like `- advice[0] row 0 = 0x2a`.
-///
-/// Measures the entire cell-values section: from `cell_values: [` (raw) or
-/// `Cell values:` (ZeroStyl) to the closing bracket/next section.
+/// Raw halo2 renders each cell as a multi-line `VirtualCell { … }` block (~10 lines, ~150 chars)
+/// inside a `cell_values: [ … ]` list. The ZeroStyl report condenses the same information onto a
+/// single `  Details: …` line per failure. This measures how much text each spends on that.
 fn cell_section_chars(s: &str) -> usize {
-    // Find start of cell values section
-    let start = s.find("cell_values: [").or_else(|| s.find("Cell values:")).unwrap_or(0);
-    let slice = &s[start..];
-
-    // Find end: for raw, the closing `],` after the list;
-    // for ZeroStyl, the next blank line or `Hint:` line
-    let end = slice
-        .find("\n  Hint:")
-        .or_else(|| {
-            // For raw halo2: find the `],` that closes the cell_values list
-            // Count opening brackets to find the matching close
-            let mut depth = 0i32;
-            let mut pos = 0;
-            for (i, c) in slice.char_indices() {
-                match c {
-                    '[' | '{' | '(' => depth += 1,
-                    ']' | '}' | ')' => {
-                        depth -= 1;
-                        if depth == 0 {
-                            pos = i + 1;
-                            break;
-                        }
+    if let Some(start) = s.find("cell_values: [") {
+        // Raw halo2: measure from `cell_values: [` to its matching close.
+        let slice = &s[start..];
+        let mut depth = 0i32;
+        let mut end = slice.len();
+        for (i, c) in slice.char_indices() {
+            match c {
+                '[' | '{' | '(' => depth += 1,
+                ']' | '}' | ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = i + 1;
+                        break;
                     }
-                    _ => {}
                 }
+                _ => {}
             }
-            if pos > 0 {
-                Some(pos)
-            } else {
-                None
-            }
-        })
-        .unwrap_or(slice.len());
-
-    slice[..end].len()
+        }
+        return slice[..end].len();
+    }
+    // ZeroStyl: sum the length of every `Details:` line (the condensed diagnosis).
+    s.lines().filter(|l| l.trim_start().starts_with("Details:")).map(str::len).sum()
 }
 
-/// Whether the gate name is visible in the first 5 lines of the FAILURE section.
-/// Raw halo2 buries it deep in a struct; ZeroStyl surfaces it on the first failure line.
-fn gate_visible_in_failure_first_line(s: &str, gate_name: &str) -> bool {
-    let failure_start = s.find("ConstraintNotSatisfied").or_else(|| s.find("FAILED:")).unwrap_or(0);
-    let from_failure = &s[failure_start..];
-    from_failure.lines().next().map(|l| l.contains(gate_name)).unwrap_or(false)
+/// Whether the gate name is visible near the top of the FAILURE section (first 3 lines).
+/// Raw halo2 buries it deep inside the pretty-printed struct; the ZeroStyl report surfaces it on a
+/// dedicated `Gate:` line right under the failure header.
+fn gate_visible_near_top_of_failure(s: &str, gate_name: &str) -> bool {
+    let from_failure = &s[failure_section_start(s)..];
+    from_failure.lines().take(3).any(|l| l.contains(gate_name))
 }
 
 // ─── Scenario result ────────────────────────────────────────────────────────
@@ -150,7 +140,7 @@ struct OutputMetrics {
     max_nesting_depth: usize,
     chars_to_gate_in_failure: usize,
     cell_section_chars: usize,
-    gate_on_failure_first_line: bool,
+    gate_near_top_of_failure: bool,
 }
 
 impl OutputMetrics {
@@ -162,7 +152,7 @@ impl OutputMetrics {
             max_nesting_depth: max_nesting_depth(s),
             chars_to_gate_in_failure: chars_to_gate_name_in_failure(s, gate_name),
             cell_section_chars: cell_section_chars(s),
-            gate_on_failure_first_line: gate_visible_in_failure_first_line(s, gate_name),
+            gate_near_top_of_failure: gate_visible_near_top_of_failure(s, gate_name),
         }
     }
 }
@@ -239,8 +229,8 @@ fn scenario_a() -> (ScenarioResult, String, String) {
     let result = ScenarioResult::new(
         "A",
         "state_mask",
-        "commitment=999 (correct: value+randomness=165)",
-        "commitment",
+        "public commitment set to 999 (does not match the committed state)",
+        "permute state",
         &raw_output,
         &zerostyl_output,
     );
@@ -261,7 +251,11 @@ fn scenario_b() -> (ScenarioResult, String, String) {
     let comm_old = TxPrivacyCircuit::compute_commitment(Fr::from(balance_old), r_old);
     let comm_new = TxPrivacyCircuit::compute_commitment(Fr::from(balance_new), r_new);
     let root = TxPrivacyCircuit::compute_merkle_root(comm_old, &path, &indices);
-    let pi = vec![vec![comm_old, comm_new, root]];
+    // The tx_privacy circuit exposes 4 public inputs: [commitment_old, commitment_new,
+    // merkle_root, nullifier]. Omitting the nullifier row would add a spurious instance
+    // failure to the raw-vs-ZeroStyl comparison this benchmark exists to demonstrate.
+    let nullifier = TxPrivacyCircuit::compute_nullifier(Fr::from(balance_old), r_old);
+    let pi = vec![vec![comm_old, comm_new, root, nullifier]];
 
     let circuit_raw = black_box(TxPrivacyCircuit::from_raw(
         balance_old,
@@ -397,9 +391,9 @@ fn print_scenario(r: &ScenarioResult) {
         r.zerostyl.cell_section_chars,
     );
     row_bool(
-        "Gate on first failure line",
-        r.raw.gate_on_failure_first_line,
-        r.zerostyl.gate_on_failure_first_line,
+        "Gate near top of failure",
+        r.raw.gate_near_top_of_failure,
+        r.zerostyl.gate_near_top_of_failure,
     );
     println!();
 }
@@ -407,16 +401,8 @@ fn print_scenario(r: &ScenarioResult) {
 fn print_summary(results: &[ScenarioResult]) {
     let n = results.len() as f64;
 
-    let avg_line_red = results
-        .iter()
-        .map(|r| (1.0 - r.zerostyl.lines as f64 / r.raw.lines as f64) * 100.0)
-        .sum::<f64>()
-        / n;
-    let avg_noise_red = results
-        .iter()
-        .map(|r| (1.0 - r.zerostyl.noise_lines as f64 / r.raw.noise_lines.max(1) as f64) * 100.0)
-        .sum::<f64>()
-        / n;
+    // Nesting depth is the one format-agnostic, always-favorable metric: raw halo2 `{:#?}` nests
+    // structs several levels deep; the ZeroStyl report is flat.
     let avg_depth_red = results
         .iter()
         .map(|r| {
@@ -425,46 +411,42 @@ fn print_summary(results: &[ScenarioResult]) {
         })
         .sum::<f64>()
         / n;
-    let avg_gate_chars_red = results
+
+    // Line count is NOT universally reduced: raw halo2 renders a `ConstraintNotSatisfied` failure
+    // as a deep multi-line struct (where ZeroStyl wins big), but renders equality/permutation
+    // failures as a single terse line (where ZeroStyl's structured header adds a few lines). Report
+    // the best case honestly instead of averaging across failure types into a misleading number.
+    let best = results.iter().max_by_key(|r| r.raw.lines).expect("at least one scenario");
+    let gate_near_top_gain = results
         .iter()
-        .map(|r| {
-            (1.0 - r.zerostyl.chars_to_gate_in_failure as f64
-                / r.raw.chars_to_gate_in_failure.max(1) as f64)
-                * 100.0
-        })
-        .sum::<f64>()
-        / n;
-    let avg_cell_section_red = results
-        .iter()
-        .map(|r| {
-            (1.0 - r.zerostyl.cell_section_chars as f64 / r.raw.cell_section_chars.max(1) as f64)
-                * 100.0
-        })
-        .sum::<f64>()
-        / n;
-    let gate_on_first_line_gain = results
-        .iter()
-        .filter(|r| r.zerostyl.gate_on_failure_first_line && !r.raw.gate_on_failure_first_line)
+        .filter(|r| r.zerostyl.gate_near_top_of_failure && !r.raw.gate_near_top_of_failure)
         .count();
 
     println!("════════  SUMMARY  ════════════════════════════════════════════");
     println!();
-    println!("  {:<40}  {:>8}", "Metric", "Avg reduction");
-    println!("  {}", "─".repeat(52));
-    println!("  {:<40}  {:>7.0}%", "Output lines", avg_line_red);
-    println!("  {:<40}  {:>7.0}%", "Noise lines (zero-info formatting)", avg_noise_red);
-    println!("  {:<40}  {:>7.0}%", "Max struct nesting depth", avg_depth_red);
-    println!("  {:<40}  {:>7.0}%", "Chars to gate name in failure", avg_gate_chars_red);
-    println!("  {:<40}  {:>7.0}%", "Chars for cell values section", avg_cell_section_red);
+    println!("  ZeroStyl reorganizes halo2 failures into a flat, labeled report. Its consistent");
+    println!("  win is structural; its line/char win is largest on verbose constraint failures");
+    println!(
+        "  and smaller (or slightly negative) on already-terse equality/permutation failures."
+    );
     println!();
     println!(
-        "  Gate on first failure line: {}/{} (ZeroStyl) vs 0/{} (raw halo2)",
-        gate_on_first_line_gain,
+        "  Max struct nesting depth ........ {:>4.0}% shallower (avg, all scenarios)",
+        avg_depth_red
+    );
+    println!(
+        "  Verbose case (scenario {} / {}) .... raw {} lines → ZeroStyl {} lines",
+        best.scenario, best.circuit, best.raw.lines, best.zerostyl.lines
+    );
+    println!(
+        "  Gate name near top of failure ... {}/{} scenarios (ZeroStyl) vs 0/{} (raw halo2)",
+        gate_near_top_gain,
         results.len(),
         results.len()
     );
     println!();
-    println!("  For timing results: cargo bench -p zerostyl-debugger");
+    println!("  Per-scenario line/char deltas are shown above (negative = ZeroStyl adds structure");
+    println!("  to an already-terse raw failure; large positive = raw was a deep nested struct).");
     println!();
 }
 
@@ -492,8 +474,6 @@ fn main() {
         println!();
         println!("ZeroStyl — Output Quality Comparison");
         println!("Real circuits · Real broken witnesses · Deterministic metrics");
-        println!();
-        println!("For timing: cargo bench -p zerostyl-debugger");
     }
 
     let (result_a, raw_a, z_a) = scenario_a();
