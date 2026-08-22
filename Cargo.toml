@@ -9,6 +9,7 @@ members = [
     "crates/zerostyl-exporter",
     "crates/zerostyl-runtime",
     "crates/zerostyl-sdk",
+    "crates/zerostyl-orbit",
     "crates/zerostyl-verifier",
     "examples/example_demo",
     "examples/tx_privacy",
