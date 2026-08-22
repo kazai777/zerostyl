@@ -11,6 +11,8 @@ alloy-primitives = "=0.8.20"
 alloy-sol-types = "=0.8.20"
 stylus-sdk = "0.9.0"
 ruint = "=1.12.3"
+# Real on-chain KZG verification: no_std verifier with the embedded state_mask VK.
+zerostyl-verifier = { path = "../../crates/zerostyl-verifier", default-features = false, features = ["state_mask_vk"] }
 
 [dev-dependencies]
 alloy-primitives = { version = "=0.8.20", features = ["sha3-keccak"] }
@@ -34,3 +36,9 @@ lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
+
+# This contract is outside the workspace, so it must replicate the workspace's halo2 patch: the
+# ZeroStyl circuits/verifier use the PSE fork of halo2 (KZG on BN254, `bits` feature), not the
+# stock crates.io halo2_proofs.
+[patch.crates-io]
+halo2_proofs = { git = "https://github.com/privacy-scaling-explorations/halo2.git", tag = "v0.3.0" }
