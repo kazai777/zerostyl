@@ -1,24 +1,24 @@
 [package]
 name = "zerostyl-runtime"
-version = "0.1.0"
-edition = "2021"
-authors = ["kazai777 <kazai777.dev@gmail.com>"]
-license = "MIT"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
 description = "Shared runtime utilities for ZeroStyl toolkit (no_std): types, standardized privacy-transaction event, bytecode fingerprinting"
-repository = "https://github.com/kazai777/zerostyl"
 keywords = ["arbitrum", "stylus", "zero-knowledge", "privacy", "zk-snarks"]
 categories = ["cryptography", "no-std"]
 
 [dependencies]
-serde = { version = "1.0", default-features = false, features = ["derive", "alloc"] }
-thiserror = { version = "2", default-features = false }
+serde = { workspace = true, features = ["alloc"] }
+thiserror = { workspace = true }
 # Keccak-256 for EVM-compatible event topics and bytecode fingerprints (no_std).
 sha3 = { version = "0.10", default-features = false }
-hex = { version = "0.4", default-features = false, features = ["alloc"] }
+hex = { workspace = true, features = ["alloc"] }
 
 [features]
 default = ["std"]
 std = ["serde/std", "thiserror/std", "sha3/std", "hex/std"]
 
 [dev-dependencies]
-serde_json = "1.0"
+serde_json = { workspace = true }
