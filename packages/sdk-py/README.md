@@ -6,7 +6,13 @@ generates typed Python bindings — the same scope as `@zerostyl/sdk-ts`, in Pyt
 
 Pure Python, zero runtime dependencies, Python ≥ 3.10.
 
-## Install (from the repo)
+## Install
+
+```bash
+pip install zerostyl-sdk
+```
+
+Or from a clone of the repository, for development:
 
 ```bash
 cd packages/sdk-py
@@ -29,9 +35,8 @@ Path("deposit_bindings.py").write_text(bindings)
 CLI (equivalent of the TS SDK's `zerostyl-sdk generate`):
 
 ```bash
-# after `pip install` (see above), either form works:
-zerostyl-sdk-py generate --abi ../../examples/zk_private_demo/abi.json --out bindings.py
-python -m zerostyl_sdk generate --abi ../../examples/zk_private_demo/abi.json
+zerostyl-sdk-py generate --abi abi.json --out bindings.py
+python -m zerostyl_sdk generate --abi abi.json
 ```
 
 Generated output for the demo circuit:
@@ -70,8 +75,7 @@ The snapshot test locks the generated bindings for
 ## Scope and future work
 
 Codegen only — proof generation from Python (bindings to the Rust prover) and on-chain
-submission helpers are future work, mirroring the TypeScript SDK's roadmap. The package
-is not yet published to PyPI.
+submission helpers are future work, mirroring the TypeScript SDK's roadmap.
 
 ## License
 

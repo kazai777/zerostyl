@@ -12,17 +12,20 @@ TypeScript SDK for the [ZeroStyl](https://github.com/kazai777/zerostyl) zk toolk
 
 ## Install
 
-> **Not yet on npm.** Publishing lands with a later release. For now, use the package from a clone of the ZeroStyl monorepo (see [Use from the monorepo](#use-from-the-monorepo) below). Once published, install will be the standard:
->
-> ```bash
-> pnpm add -D @zerostyl/sdk-ts   # planned, not live yet
-> ```
+```bash
+npm install @zerostyl/sdk-ts
+# or: pnpm add @zerostyl/sdk-ts
+```
 
-Node ≥ 20 (the SDK is ESM-only).
+Node ≥ 20 (the SDK is ESM-only). After installing, the `zerostyl-sdk` CLI is available:
+
+```bash
+npx zerostyl-sdk generate --abi abi.json --out circuit.ts
+```
 
 ## Use from the monorepo
 
-Clone the repo, install workspace dependencies, build the SDK once, then invoke the CLI directly via Node:
+To work from a clone of the repository (for development), build the SDK once and invoke the CLI directly via Node:
 
 ```bash
 git clone https://github.com/kazai777/zerostyl.git
@@ -87,7 +90,7 @@ export interface DepositPublicInputs {
 
 ## Programmatic API
 
-Once the package is on npm, you can drive the codegen from a build script:
+Drive the codegen from a build script:
 
 ```typescript
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -118,11 +121,10 @@ REGEN_SDK_TS_SNAPSHOTS=1 pnpm --filter @zerostyl/sdk-ts test
 
 | Release | Adds |
 |---|---|
-| 0.1.x | Codegen (this release — monorepo-only until the npm publish workflow lands) |
-| 0.2.x | First npm publish + GitHub Actions release workflow |
-| 0.3.x | WASM bundle of the Rust prover — `prove()` runs in Node and the browser |
-| 0.4.x | `submit()` helper for the universal on-chain verifier, via ethers v6 |
-| 0.5.x | Generated `<Name>TransformedCall` interface, end-to-end ABI-typed verifier calls |
+| 0.1.x | Codegen: `AbiSchema` → typed TypeScript bindings (this release) |
+| 0.2.x | WASM bundle of the Rust prover — `prove()` runs in Node and the browser |
+| 0.3.x | `submit()` helper for an on-chain verifier, via ethers v6 |
+| 0.4.x | Generated `<Name>TransformedCall` interface, end-to-end ABI-typed verifier calls |
 
 ## License
 
