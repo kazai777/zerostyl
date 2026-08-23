@@ -11,7 +11,7 @@ zerostyl-circuits = { path = "../../crates/zerostyl-circuits" }
 zerostyl-compiler = { path = "../../crates/zerostyl-compiler" }
 zerostyl-runtime = { path = "../../crates/zerostyl-runtime" }
 halo2_proofs = { version = "=0.3.0", features = ["dev-graph"] }
-halo2curves = "0.6"
+halo2curves = "0.10"
 ff = "0.13"
 group = "0.13"
 rand = "0.8"

@@ -14,7 +14,7 @@ categories = ["cryptography", "no-std"]
 # require the std feature set here. default-features off keeps rand/multicore out of the build.
 halo2_proofs = { version = "=0.3.0", default-features = false }
 halo2_poseidon = "0.1"
-halo2curves = { version = "0.6", default-features = false, features = ["bits"] }
+halo2curves = { version = "0.10", default-features = false, features = ["bits"] }
 lazy_static = { version = "1.5", features = ["spin_no_std"] }
 
 # On wasm32 the transitive `ff`/`rand_core` dependency pulls `getrandom`, which refuses to build
@@ -22,7 +22,7 @@ lazy_static = { version = "1.5", features = ["spin_no_std"] }
 # compile; the actual `__getrandom_custom` symbol is supplied by the final binary (e.g. the Stylus
 # verifier registers one). Circuit building/verification never actually draws randomness.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-getrandom = { version = "0.2", default-features = false, features = ["custom"] }
+getrandom = { version = "0.4", default-features = false, features = ["custom"] }
 
 [dev-dependencies]
 halo2_proofs = { version = "=0.3.0", features = ["dev-graph"] }

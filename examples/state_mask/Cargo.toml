@@ -10,7 +10,7 @@ publish = false
 # Circuit-only dependencies (no_std / wasm-compatible).
 zerostyl-gadgets = { path = "../../crates/zerostyl-gadgets" }
 halo2_proofs = { version = "=0.3.0", default-features = false, features = ["bits"] }
-halo2curves = { version = "0.6", default-features = false, features = ["bits"] }
+halo2curves = { version = "0.10", default-features = false, features = ["bits"] }
 
 # std-only: the CircuitDescriptor (prover, witness JSON, MockProver reporting) lives behind the
 # `std` feature so the circuit itself can be compiled for wasm32 without pulling the full compiler.
@@ -23,7 +23,7 @@ hex = { version = "0.4", optional = true }
 
 # On wasm32 a transitive dependency pulls getrandom; the `custom` feature lets the rlib build.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-getrandom = { version = "0.2", default-features = false, features = ["custom"] }
+getrandom = { version = "0.4", default-features = false, features = ["custom"] }
 
 [features]
 default = ["std"]
