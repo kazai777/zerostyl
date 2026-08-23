@@ -14,7 +14,7 @@ crate-type = ["cdylib", "rlib"]
 # Halo2 dependencies
 # Disable default features (multicore) for WASM compatibility
 halo2_proofs = { version = "=0.3.0", default-features = false }
-halo2curves = { version = "0.6", default-features = false, features = ["bits"] }
+halo2curves = { version = "0.10", default-features = false, features = ["bits"] }
 
 # Serialization - no_std compatible
 serde = { workspace = true, features = ["alloc"] }
@@ -31,7 +31,7 @@ mini-alloc = { version = "0.9", optional = true }
 
 # WASM support - use custom getrandom for Stylus (no wasm-bindgen)
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-getrandom = { version = "0.2", default-features = false, features = ["custom"] }
+getrandom = { version = "0.4", default-features = false, features = ["custom"] }
 
 # state_mask circuit — used (a) at runtime to name the circuit type for VK deserialization and
 # (b) at build time to generate its serialized VK + params. Only pulled in with the
@@ -44,7 +44,7 @@ default-features = false
 
 [build-dependencies]
 halo2_proofs = "=0.3.0"
-halo2curves = { version = "0.6", features = ["bits", "derive_serde"] }
+halo2curves = { version = "0.10", features = ["bits", "derive_serde"] }
 rand = "0.8"
 zerostyl-runtime = { path = "../zerostyl-runtime" }
 # Circuit-only at build time: build.rs just needs StateMaskCircuit for keygen_vk.
