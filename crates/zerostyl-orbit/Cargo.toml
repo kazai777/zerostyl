@@ -10,7 +10,7 @@ keywords = ["arbitrum", "stylus", "orbit", "zero-knowledge", "privacy"]
 categories = ["cryptography", "development-tools"]
 
 [dependencies]
-zerostyl-circuits = { path = "../zerostyl-circuits" }
+zerostyl-circuits = { path = "../zerostyl-circuits", version = "0.1.0" }
 serde = { workspace = true, features = ["std"] }
 toml = "0.8"
 thiserror = { workspace = true, features = ["std"] }
