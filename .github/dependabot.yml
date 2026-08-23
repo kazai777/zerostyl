@@ -34,6 +34,16 @@ updates:
     groups:
       npm:
         patterns: ["*"]
+    ignore:
+      # Dev-only toolchain. Hold major upgrades and adopt them deliberately:
+      # Biome 2 needs `biome migrate`, and TypeScript 7 (the new Go compiler) is
+      # too fresh to pin a build to. Minor/patch updates still flow through.
+      - dependency-name: "@biomejs/biome"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "vitest"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "pip"
     directory: "/packages/sdk-py"
