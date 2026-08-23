@@ -14,6 +14,21 @@ settled. All workspace crates share a single version, declared once in the root 
 
 ## [Unreleased]
 
+## [0.1.1] — 2026-08-23
+
+Documentation-only republish of the JavaScript and Python SDKs (`@zerostyl/sdk-ts` on npm,
+`zerostyl-sdk` on PyPI). The Rust crates are unchanged and remain at `0.1.0` on crates.io.
+
+### Fixed
+- SDK READMEs: corrected the install instructions to reflect the published packages
+  (`npm install @zerostyl/sdk-ts`, `pip install zerostyl-sdk`) and removed the stale "not yet
+  published" notes.
+
+## [0.1.0] — 2026-08-23
+
+First published release. Crates on crates.io: `zerostyl-runtime`, `zerostyl-circuits`,
+`zerostyl-orbit`, `zerostyl-sdk`. SDKs: `@zerostyl/sdk-ts` (npm), `zerostyl-sdk` (PyPI).
+
 ### Added
 - `zerostyl-orbit` — per-chain size/gas/precompile profiles and deployability analysis for Arbitrum
   Orbit chains, with a `list`/`show`/`check`/`matrix`/`init` CLI.
@@ -45,11 +60,6 @@ settled. All workspace crates share a single version, declared once in the root 
   (no replay via re-proving).
 - Circuit `k` estimation accounts for the added comparison range checks.
 - KZG params cache filename includes the SRS seed, preventing reuse of a stale/foreign SRS.
-
-## [0.1.0] — unreleased
-
-Initial toolkit: `zerostyl-debug`, `zerostyl-prove`, `zerostyl-verifier`, and the built-in circuits
-(`tx_privacy`, `state_mask`, `private_vote`).
 
 <!--
 Release checklist (per version):

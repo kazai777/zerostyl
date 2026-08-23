@@ -113,7 +113,6 @@ commitment in the merkle tree, without revealing their balance or amount.
 
 **Circuit**: `tx_privacy` | **WASM size**: ~18 KB
 **Arbitrum Sepolia Contract**: 0x0c61c2d2f15a2f26c13bbe9882e56d545f393bd3
-**Demo**: `vhs docs/assets/tx_privacy.tape` → [`docs/assets/tx_privacy.gif`](../docs/assets/tx_privacy.gif)
 
 The ZeroStyl proof guarantees:
 - `commitment_old = Poseidon(balance_old, randomness_old)`
@@ -147,7 +146,6 @@ without revealing the value itself.
 
 **Circuit**: `state_mask` | **Use cases**: collateral ratios, credit score thresholds, balance minimums
 **Arbitrum Sepolia Contract**: 0xf88346c0a80690a2f9d359f70d157fa36f1be7e0
-**Demo**: `vhs docs/assets/state_mask.tape` → [`docs/assets/state_mask.gif`](../docs/assets/state_mask.gif)
 
 The ZeroStyl proof guarantees:
 - `commitment = Poseidon(state_value, nonce)`
@@ -177,7 +175,6 @@ The tally is public; individual votes are cryptographically hidden.
 
 **Circuit**: `private_vote` | **Anti-fraud**: nullifier prevents double-voting
 **Arbitrum Sepolia Contract**: 0xd21389dffe34235a9f8d6c4e88ac1fec70670edf
-**Demo**: `vhs docs/assets/private_vote.tape` → [`docs/assets/private_vote.gif`](../docs/assets/private_vote.gif)
 
 The ZeroStyl proof guarantees:
 - `balance_commitment = Poseidon(balance, randomness_balance)`
@@ -213,7 +210,6 @@ are solvent on a schedule without revealing their exact balance to liquidators o
 
 **Circuit**: `state_mask` | **Use case**: prove `balance ≥ min_collateral` without revealing balance
 **Arbitrum Sepolia Contract**: 0xaa948bd92dbe5b1de9af384add42fc6859288f36
-**Demo**: `vhs docs/assets/lending_pool.tape` → [`docs/assets/lending_pool.gif`](../docs/assets/lending_pool.gif)
 
 The ZeroStyl proof guarantees (reuses state_mask circuit):
 - `commitment = Poseidon(balance, nonce)`
@@ -248,7 +244,6 @@ Multi-circuit private swaps. Combines `tx_privacy` (balance transfer) and `state
 
 **Circuits**: `tx_privacy` + `state_mask`
 **Arbitrum Sepolia Contract**: 0xd5dfa87f650453dbb5f3da46b6faadf02134bb76
-**Demo**: `vhs docs/assets/private_swap.tape` → [`docs/assets/private_swap.gif`](../docs/assets/private_swap.gif)
 
 The ZeroStyl proofs guarantee:
 - `commitment_in = Poseidon(balance_old, randomness_old)` — input commitment is valid
