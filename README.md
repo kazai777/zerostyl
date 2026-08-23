@@ -275,11 +275,7 @@ cargo fmt --all
 
 ## Security & status
 
-ZeroStyl is under active development and has **not** been audited. It is not production-ready and is
-not deployed to any mainnet. The testnet contracts on Arbitrum Sepolia currently record a proof hash
-and do **not** yet verify the SNARK on-chain — their integrity guarantees are conditional. Read the
-"Current Security Model" section of [contracts/CONTRACTS.md](contracts/CONTRACTS.md) before relying
-on anything here.
+ZeroStyl is under active development and has **not** been audited. It is not production-ready.
 
 Found a vulnerability? Please open a security advisory on the repository rather than a public issue.
 
