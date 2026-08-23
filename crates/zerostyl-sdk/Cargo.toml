@@ -10,8 +10,8 @@ keywords = ["arbitrum", "stylus", "zero-knowledge", "privacy", "zk-snarks"]
 categories = ["cryptography", "development-tools"]
 
 [dependencies]
-zerostyl-circuits = { path = "../zerostyl-circuits" }
-zerostyl-runtime = { path = "../zerostyl-runtime" }
+zerostyl-circuits = { path = "../zerostyl-circuits", version = "0.1.0" }
+zerostyl-runtime = { path = "../zerostyl-runtime", version = "0.1.0" }
 serde = { workspace = true, features = ["std"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true, features = ["std"] }
