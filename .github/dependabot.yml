@@ -13,13 +13,25 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        patterns: ["*"]
 
   - package-ecosystem: "npm"
     directory: "/packages/sdk-ts"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      npm:
+        patterns: ["*"]
 
   - package-ecosystem: "pip"
     directory: "/packages/sdk-py"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      pip:
+        patterns: ["*"]
