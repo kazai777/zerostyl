@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://docs.zerostyl.dev
+    about: Guides, tutorials, and CLI / circuit reference.
+  - name: Website
+    url: https://zerostyl.dev
+    about: Project overview and the technical dashboard.

@@ -1,0 +1,43 @@
+name: Bug report
+description: Report a defect in a ZeroStyl crate, CLI, or SDK
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please do **not** use this form for security
+        vulnerabilities — see the
+        [Security policy](https://github.com/kazai777/zerostyl/security/policy) instead.
+  - type: input
+    id: component
+    attributes:
+      label: Component
+      description: Which part is affected?
+      placeholder: "e.g. zerostyl-prove, zerostyl-debug, zerostyl-sdk, @zerostyl/sdk-ts"
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Exact commands and, if relevant, the witness/circuit used.
+      placeholder: |
+        1. zerostyl-prove generate --circuit state_mask --witnesses ...
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: OS, `rustc --version`, and the crate/CLI version or commit.
+      placeholder: "macOS 15 · rustc 1.85 · zerostyl @ <commit>"
+    validations:
+      required: true
