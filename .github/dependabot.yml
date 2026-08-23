@@ -12,7 +12,6 @@ updates:
       # Pinned to 0.2 for its `custom` feature (no_std/wasm32 Stylus build).
       # 0.3+ removed that feature — see crates/zerostyl-gadgets/Cargo.toml.
       - dependency-name: "getrandom"
-        versions: [">= 0.3"]
       # Governed by the pinned halo2 PSE fork ([patch.crates-io]); must not be
       # bumped independently or it conflicts with the fork's expected version.
       - dependency-name: "halo2curves"
