@@ -6,9 +6,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use syn::ItemFn;
-use zerostyl_exporter::{
-    from_attrs, from_descriptor, parser::parse_fn, resolver::resolve_all, schema::AbiSchema,
-};
+use zerostyl_exporter::{from_attrs, from_descriptor, resolver::resolve_fn, schema::AbiSchema};
 
 #[test]
 fn from_attrs_matches_from_descriptor_for_zk_private_demo() {
@@ -25,8 +23,7 @@ fn from_attrs_matches_from_descriptor_for_zk_private_demo() {
         .find_map(|i| if let syn::Item::Fn(f) = i { Some(f) } else { None })
         .expect("fn present in source");
 
-    let attrs = parse_fn(&item_fn).expect("parse_fn succeeds");
-    let resolved = resolve_all(&attrs).expect("resolve_all succeeds");
+    let resolved = resolve_fn(&item_fn).expect("resolve_fn succeeds");
     let codegen_time: AbiSchema = from_attrs("deposit", &resolved).expect("from_attrs succeeds");
 
     let runtime: AbiSchema = from_descriptor(zk_private_demo::descriptor());

@@ -188,6 +188,41 @@ Each `#[zk_private(...)]` attribute key maps to a specific gadget. You can decla
 
 Supported param types: `u8`, `u16`, `u32`, `u64`, `u128`, `bool`, `U256`. Other types require the manual path.
 
+### How constraint operands are bound
+
+Every variable a `constraint` mentions is classified at generation time, and each class is bound to
+something the verifier actually checks — an operand left unbound would be a witness the *prover*
+picks, so `value >= threshold` would prove `value >= <whatever the prover chose>` while the
+contract's `threshold` argument bound nothing.
+
+For a comparison (`value >= other`):
+
+| The operand names… | How it is bound | Where it shows up |
+|---|---|---|
+| another `#[zk_private]` param | private witness, anchored by its own Poseidon commitment | `witness.fields` (`"visibility": "private"`) |
+| a plain function param | **instance cell** of the circuit (`constrain_instance`) | `public_inputs.fields`, and the generated `public_inputs(...)` argument list |
+| anything else | rejected | — |
+
+`merkle_member(value, root, siblings, indices)` names witness fields the codegen creates rather than
+function parameters. `siblings` and `indices` are the private path. `root` is public: the circuit
+recomputes the root from the path and constrains it to an instance cell, so the value the prover
+supplies must equal the one the verifier is given — and the transformed contract takes it as a
+`B256` argument.
+
+The generation step fails rather than emitting an unsound circuit when an operand is a literal
+constant, a derived expression or call, a name that is not a parameter of the function, a parameter
+whose type has a different bit width than the annotated one, or when a generated name (`{param}_nonce`,
+`{param}_commitment`, a `merkle_member` variable) collides with a parameter of the source signature.
+Range bounds must also be literals that fit in a `u64`, since the circuit casts them before mapping
+into the BN254 scalar field.
+
+A public operand still travels in the witness JSON — the prover has to assign the advice cell — but
+`abi.json` marks it `"visibility": "public"`, lists it under `public_inputs`, and leaves it out of
+`circuit.num_private_witnesses` (which counts private fields only, not the length of
+`witness.fields`). The transformed contract forwards its own argument of the same name to
+`verify_proof`, so changing that argument changes the public inputs and a proof made for one value
+cannot be replayed against another.
+
 ### Worked example
 
 The source contract:
@@ -216,7 +251,7 @@ zerostyl-export transform --contract contract_source.rs
 
 You get four artifacts in `./generated/`:
 
-- **`circuit.rs`** — a halo2 `Circuit<Fr>` impl that wires `PoseidonCommitmentChip`, `RangeProofChip`, and `ComparisonChip` according to the attributes. Witnesses: `collateral`, `collateral_nonce`, `threshold`.
+- **`circuit.rs`** — a halo2 `Circuit<Fr>` impl that wires `PoseidonCommitmentChip`, `RangeProofChip`, and `ComparisonChip` according to the attributes. Witness cells: `collateral`, `collateral_nonce`, `threshold`. Instance cells: `[0] = collateral_commitment`, `[1] = threshold` (the constraint reads the public `threshold` param, so it is constrained to an instance cell rather than left free).
 - **`descriptor.rs`** — a `CircuitDescriptor` impl with `prove` / `verify` / `mock_prove` / `inspect` implemented against `NativeProver` and `MockProver`. Also re-exposes `pub fn descriptor() -> &'static dyn CircuitDescriptor` so it slots into `register_circuit!`.
 - **`contract_transformed.rs`** — the privacy-safe ABI. Each `#[zk_private]` param becomes a
   `B256` commitment (plus a `B256` Merkle root param when the attribute uses `merkle_member`),
@@ -235,7 +270,8 @@ You get four artifacts in `./generated/`:
     `false` so an unconfigured contract rejects everything; you MUST override it to call a real
     verifier such as `zerostyl-verifier` before it accepts anything);
   - `public_inputs(...)` returning the 32-byte little-endian field representations in circuit
-    order, `derive_nullifier` (a per-commitment keccak256 replay guard over `commitment` alone,
+    order — here `public_inputs(collateral_commitment, threshold)`, so the value the caller passed
+    is exactly what the proof is checked against — `derive_nullifier` (a per-commitment keccak256 replay guard over `commitment` alone,
     so a commitment can be accepted only once — not an unlinkable circuit nullifier), and the
     `ZeroStylPrivacyTransaction` constants (`SIGNATURE`, precomputed `topic0`, `CIRCUIT_ID`)
     inlined from `zerostyl-runtime` at generation time;

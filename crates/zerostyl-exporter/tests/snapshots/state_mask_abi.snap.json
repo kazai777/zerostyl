@@ -6,7 +6,7 @@
     "description": "Privacy-preserving state proof: Poseidon commitment + bounded range + balance comparison.",
     "default_k": 10,
     "num_public_inputs": 2,
-    "num_private_witnesses": 5
+    "num_private_witnesses": 4
   },
   "witness": {
     "fields": [

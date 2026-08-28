@@ -46,6 +46,42 @@ pub struct MerkleMemberSpec {
     pub indices_var: String,
 }
 
+/// One parameter of the annotated function, as declared in the source signature.
+///
+/// The resolver needs the *whole* signature — not just the annotated params — to decide how a
+/// constraint operand is bound: an operand naming a plain parameter is a public input of the
+/// call, and must end up in the circuit's instance column rather than as a free witness.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FnParam {
+    /// Parameter name as written in the signature.
+    pub name: String,
+    /// Parameter type, as token text (e.g. `u64`, `alloy_primitives :: U256`).
+    pub ty: String,
+    /// Whether the parameter carries a `#[zk_private]` attribute.
+    pub is_private: bool,
+}
+
+/// Collect every parameter of `item_fn`, annotated or not.
+pub fn parse_signature(item_fn: &ItemFn) -> Result<Vec<FnParam>> {
+    let mut out = Vec::new();
+    for arg in &item_fn.sig.inputs {
+        let FnArg::Typed(typed) = arg else {
+            return Err(ExporterError::Parse(
+                "#[zk_private] functions do not support `self` receivers".into(),
+            ));
+        };
+        let name = pat_ident(&typed.pat).ok_or_else(|| {
+            ExporterError::Parse(format!(
+                "#[zk_private] functions only support named identifier params; got pattern: {}",
+                typed.pat.to_token_stream()
+            ))
+        })?;
+        let is_private = typed.attrs.iter().any(|a| a.path().is_ident("zk_private"));
+        out.push(FnParam { name, ty: typed.ty.to_token_stream().to_string(), is_private });
+    }
+    Ok(out)
+}
+
 pub fn parse_fn(item_fn: &ItemFn) -> Result<Vec<ZkPrivateAttr>> {
     let mut out = Vec::new();
     for arg in &item_fn.sig.inputs {

@@ -44,7 +44,10 @@ fn transform_contract_writes_four_artifacts_in_output_dir() {
 
     let parsed: AbiSchema = serde_json::from_str(&abi).expect("abi.json is valid JSON");
     assert_eq!(parsed.circuit.name, "deposit");
-    assert_eq!(parsed.public_inputs.fields.len(), 1);
+    // The commitment, plus `threshold` — the public parameter the `value >= threshold` constraint
+    // reads, which must be an instance cell and not a prover-chosen witness.
+    let names: Vec<&str> = parsed.public_inputs.fields.iter().map(|f| f.name.as_str()).collect();
+    assert_eq!(names, vec!["collateral_commitment", "threshold"]);
 }
 
 #[test]

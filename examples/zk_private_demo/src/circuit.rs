@@ -85,6 +85,7 @@ impl Circuit<Fr> for DepositCircuit {
             threshold_value.clone(),
             64usize,
         )?;
+        layouter.constrain_instance(threshold_value.cell(), config.instance, 1usize)?;
         Ok(())
     }
 }

@@ -114,8 +114,19 @@ fn same_commitment_rejected_even_with_different_proof() {
 }
 
 #[test]
-fn public_inputs_layout_matches_commitment() {
-    assert_eq!(public_inputs(commitment()), [commitment().0]);
+fn public_inputs_layout_carries_commitment_then_threshold() {
+    // `threshold` is a real instance cell of the circuit, so the contract must forward the value
+    // it was called with, little-endian, in slot 1.
+    let mut expected_threshold = [0u8; 32];
+    expected_threshold[..8].copy_from_slice(&100u64.to_le_bytes());
+    assert_eq!(public_inputs(commitment(), 100), [commitment().0, expected_threshold]);
+}
+
+#[test]
+fn a_different_threshold_changes_the_public_inputs_handed_to_the_verifier() {
+    // Two calls that differ only in `threshold` present two different statements to
+    // `verify_proof`, so a proof made for one cannot satisfy the other.
+    assert_ne!(public_inputs(commitment(), 10), public_inputs(commitment(), 100));
 }
 
 #[test]

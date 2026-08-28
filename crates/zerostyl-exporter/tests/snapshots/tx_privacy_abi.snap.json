@@ -6,7 +6,7 @@
     "description": "Private token transfer: balance conservation + Poseidon commitments + Merkle membership.",
     "default_k": 14,
     "num_public_inputs": 4,
-    "num_private_witnesses": 6
+    "num_private_witnesses": 7
   },
   "witness": {
     "fields": [

@@ -24,7 +24,7 @@ const DESCRIPTION: &str =
     "Anonymous voting: balance commitment, boolean vote, eligibility via balance ≥ threshold.";
 const DEFAULT_K: u32 = 11;
 const NUM_PUBLIC_INPUTS: usize = 3;
-const NUM_PRIVATE_WITNESSES: usize = 5;
+const NUM_PRIVATE_WITNESSES: usize = 4;
 
 #[derive(Debug, Deserialize)]
 struct WitnessJson {
@@ -369,7 +369,7 @@ mod tests {
         assert_eq!(d.name(), "private_vote");
         assert_eq!(d.default_k(), 11);
         assert_eq!(d.num_public_inputs(), 3);
-        assert_eq!(d.num_private_witnesses(), 5);
+        assert_eq!(d.num_private_witnesses(), 4);
     }
 
     #[test]

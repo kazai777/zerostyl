@@ -7,8 +7,8 @@ DEPOSIT_CIRCUIT: Final = {
     "name": 'deposit',
     "version": '1.0.0',
     "default_k": 10,
-    "num_public_inputs": 1,
-    "num_private_witnesses": 3,
+    "num_public_inputs": 2,
+    "num_private_witnesses": 2,
 }
 
 @dataclass(frozen=True)
@@ -20,3 +20,4 @@ class DepositWitness:
 @dataclass(frozen=True)
 class DepositPublicInputs:
     collateral_commitment: str
+    threshold: int

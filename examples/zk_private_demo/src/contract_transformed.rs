@@ -11,7 +11,7 @@
 //!
 //! - `collateral_commitment` = Poseidon(collateral, collateral_nonce) — public input 0
 //! - `collateral` ∈ 0..1000000
-//! - `collateral` >= `threshold` — `threshold` is bound as a *private witness*; the proof does NOT tie it to any on-chain parameter of the same name
+//! - `collateral` >= `threshold` — public input 1, taken from this function's `threshold` argument, so the proof holds for the value the caller passed and no other
 //!
 //! Public inputs are 32-byte **little-endian** field representations
 //! (`Fr::to_repr()`), in the order listed above.
@@ -87,10 +87,14 @@ pub trait DepositHost {
     }
 }
 
-/// Public inputs in circuit order: `[0]` = `collateral_commitment`.
+/// Public inputs in circuit order: `[0]` = `collateral_commitment`, `[1]` = `threshold`.
 /// Values are forwarded as 32-byte little-endian field representations.
-pub fn public_inputs(collateral_commitment: B256) -> [[u8; 32]; 1] {
-    [collateral_commitment.0]
+pub fn public_inputs(collateral_commitment: B256, threshold: u64) -> [[u8; 32]; 2] {
+    [collateral_commitment.0, {
+        let mut repr = [0u8; 32];
+        repr[..8].copy_from_slice(&threshold.to_le_bytes());
+        repr
+    }]
 }
 
 /// Per-commitment idempotence key: `keccak256(NULLIFIER_DOMAIN ‖ commitment)`.
@@ -126,7 +130,7 @@ pub fn deposit(
     if collateral_commitment == B256::ZERO {
         return false;
     }
-    if !host.verify_proof(&proof, &public_inputs(collateral_commitment)) {
+    if !host.verify_proof(&proof, &public_inputs(collateral_commitment, threshold)) {
         return false;
     }
     let proof_hash = keccak256(&proof);

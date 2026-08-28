@@ -15,9 +15,13 @@ pub use codegen::{emit_circuit, emit_descriptor, emit_transformed_contract};
 pub use error::{ExporterError, Result};
 pub use extractor::{emit_abi_json, from_attrs, from_descriptor};
 pub use parser::{
-    parse_fn, AttrSpec, CommitScheme, Constraint, MerkleMemberSpec, RangeSpec, ZkPrivateAttr,
+    parse_fn, parse_signature, AttrSpec, CommitScheme, Constraint, FnParam, MerkleMemberSpec,
+    RangeSpec, ZkPrivateAttr,
 };
-pub use resolver::{resolve, resolve_all, ComparisonOp, GadgetBinding, ResolvedAttr, MERKLE_DEPTH};
+pub use resolver::{
+    binding_priority, public_input_layout, resolve, resolve_all, resolve_fn, ComparisonOp,
+    GadgetBinding, OperandBinding, PublicInput, ResolvedAttr, MERKLE_DEPTH,
+};
 pub use schema::{
     AbiSchema, CircuitMetadata, OnChainBinding, ProofMetadata, ProvingSystem, PublicInputsSchema,
     WitnessSchema,

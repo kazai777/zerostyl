@@ -70,7 +70,7 @@ fn main() {
         circuit_name: "state_mask".to_string(),
         k,
         num_public_inputs: 2,
-        num_private_witnesses: 5,
+        num_private_witnesses: 4,
     };
 
     prover.setup(metadata).expect("Failed to setup prover");

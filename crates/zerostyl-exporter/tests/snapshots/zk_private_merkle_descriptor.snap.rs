@@ -21,7 +21,7 @@ const VERSION: &str = "1.0.0";
 const DESCRIPTION: &str = "Auto-generated descriptor for the 'claim' privacy-aware circuit.";
 const DEFAULT_K: u32 = 10;
 const NUM_PUBLIC_INPUTS: usize = 2usize;
-const NUM_PRIVATE_WITNESSES: usize = 5usize;
+const NUM_PRIVATE_WITNESSES: usize = 4usize;
 const MERKLE_DEPTH: usize = 32;
 #[derive(Debug, Deserialize)]
 struct WitnessJson {
@@ -197,7 +197,7 @@ fn witness_schema_static() -> &'static WitnessSchema {
             WitnessField {
                 name: "root".into(),
                 kind: FieldType::Fp,
-                visibility: FieldVisibility::Private,
+                visibility: FieldVisibility::Public,
                 description: None,
             },
             WitnessField {

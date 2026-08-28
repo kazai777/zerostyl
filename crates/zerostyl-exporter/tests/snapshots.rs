@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use zerostyl_circuits::CircuitDescriptor;
+use zerostyl_circuits::{AbiSchema, CircuitDescriptor, FieldVisibility};
 use zerostyl_exporter::from_descriptor;
 
 fn snapshot_dir() -> PathBuf {
@@ -11,8 +11,26 @@ fn normalize(s: &str) -> String {
     s.replace("\r\n", "\n").trim().to_string()
 }
 
+/// Invariants every `abi.json` must hold, and that `zerostyl-sdk`'s loader enforces: the declared
+/// counts must match the schema. A witness field marked public (a comparison operand the caller
+/// supplies, a Merkle root) rides in the witness document but counts as a public input.
+fn check_counts(abi: &AbiSchema, name: &str) {
+    let private =
+        abi.witness.fields.iter().filter(|f| f.visibility == FieldVisibility::Private).count();
+    assert_eq!(
+        abi.circuit.num_private_witnesses, private,
+        "'{name}': num_private_witnesses must count the private witness fields only"
+    );
+    assert_eq!(
+        abi.circuit.num_public_inputs,
+        abi.public_inputs.fields.len(),
+        "'{name}': num_public_inputs must match public_inputs.fields"
+    );
+}
+
 fn check_snapshot(desc: &'static dyn CircuitDescriptor) {
     let abi = from_descriptor(desc);
+    check_counts(&abi, desc.name());
     let actual = serde_json::to_string_pretty(&abi).expect("serialize abi schema");
     let name = desc.name();
     let snap_path = snapshot_dir().join(format!("{name}_abi.snap.json"));

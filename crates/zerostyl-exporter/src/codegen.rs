@@ -4,7 +4,15 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
 use crate::error::{ExporterError, Result};
-use crate::resolver::{ComparisonOp, GadgetBinding, ResolvedAttr, MERKLE_DEPTH};
+use crate::resolver::{
+    binding_priority, public_input_layout, ComparisonOp, GadgetBinding, OperandBinding,
+    PublicInput, ResolvedAttr, MERKLE_DEPTH,
+};
+
+/// Map each canonical public input to its index in the circuit's instance column.
+fn instance_indices(attrs: &[ResolvedAttr]) -> std::collections::BTreeMap<String, usize> {
+    public_input_layout(attrs).iter().enumerate().map(|(i, pi)| (pi.name(), i)).collect()
+}
 
 pub fn emit_circuit(circuit_name: &str, attrs: &[ResolvedAttr]) -> Result<String> {
     enforce_single_poseidon(attrs)?;
@@ -212,9 +220,7 @@ fn emit_witness_fields(attrs: &[ResolvedAttr]) -> Vec<TokenStream> {
                     add(nonce_var, FieldKind::Scalar, &mut seen, &mut ordered);
                 }
                 GadgetBinding::Comparison { other, .. } => {
-                    if is_simple_ident(other) {
-                        add(other, FieldKind::Scalar, &mut seen, &mut ordered);
-                    }
+                    add(other, FieldKind::Scalar, &mut seen, &mut ordered);
                 }
                 GadgetBinding::MerkleMember { root_var, siblings_var, indices_var, .. } => {
                     add(root_var, FieldKind::Scalar, &mut seen, &mut ordered);
@@ -274,9 +280,7 @@ fn emit_struct_derive(
                     push_scalar(nonce_var, &mut inits, &mut seen);
                 }
                 GadgetBinding::Comparison { other, .. } => {
-                    if is_simple_ident(other) {
-                        push_scalar(other, &mut inits, &mut seen);
-                    }
+                    push_scalar(other, &mut inits, &mut seen);
                 }
                 GadgetBinding::MerkleMember { root_var, siblings_var, indices_var, .. } => {
                     push_scalar(root_var, &mut inits, &mut seen);
@@ -342,15 +346,6 @@ fn emit_configure_body(chips: &ChipUsage) -> TokenStream {
     quote! {
         #( #stmts )*
         Self::Config { #( #struct_fields ),* }
-    }
-}
-
-fn binding_priority(b: &GadgetBinding) -> u8 {
-    match b {
-        GadgetBinding::PoseidonCommit { .. } => 0,
-        GadgetBinding::Range { .. } => 1,
-        GadgetBinding::Comparison { .. } => 2,
-        GadgetBinding::MerkleMember { .. } => 3,
     }
 }
 
@@ -444,30 +439,48 @@ fn emit_synthesize_body(chips: &ChipUsage, attrs: &[ResolvedAttr]) -> Result<Tok
     }
 
     // --- Constrain pass ---
-    let mut instance_idx: usize = 0;
+    let indices = instance_indices(attrs);
+    let idx_of = |name: &str| -> Result<usize> {
+        indices.get(name).copied().ok_or_else(|| {
+            ExporterError::Other(format!("internal: '{name}' missing from the public input layout"))
+        })
+    };
+    // A public operand shared by several constraints is bound to its instance cell once.
+    let mut bound_public: BTreeSet<String> = BTreeSet::new();
     for attr in attrs {
         let mut sorted = attr.bindings.clone();
         sorted.sort_by_key(binding_priority);
         for b in &sorted {
             match b {
                 GadgetBinding::PoseidonCommit { .. } => {
-                    stmts.extend(emit_poseidon(&attr.param_name, instance_idx));
-                    instance_idx += 1;
+                    let idx = idx_of(&format!("{}_commitment", attr.param_name))?;
+                    stmts.extend(emit_poseidon(&attr.param_name, idx));
                 }
                 GadgetBinding::Range { low, high, inclusive, num_bits } => {
                     stmts.extend(emit_range(&attr.param_name, low, high, *inclusive, *num_bits)?);
                 }
-                GadgetBinding::Comparison { op, other, num_bits } => {
-                    stmts.extend(emit_comparison(&attr.param_name, *op, other, *num_bits)?);
-                }
-                GadgetBinding::MerkleMember { siblings_var, indices_var, .. } => {
-                    stmts.extend(emit_merkle(
+                GadgetBinding::Comparison { op, other, operand, num_bits } => {
+                    let instance_idx = match operand {
+                        OperandBinding::PublicInput { .. } => {
+                            if bound_public.insert(other.clone()) {
+                                Some(idx_of(other)?)
+                            } else {
+                                None
+                            }
+                        }
+                        OperandBinding::PrivateWitness => None,
+                    };
+                    stmts.extend(emit_comparison(
                         &attr.param_name,
-                        siblings_var,
-                        indices_var,
+                        *op,
+                        other,
+                        *num_bits,
                         instance_idx,
                     )?);
-                    instance_idx += 1;
+                }
+                GadgetBinding::MerkleMember { root_var, siblings_var, indices_var, .. } => {
+                    let idx = idx_of(root_var)?;
+                    stmts.extend(emit_merkle(&attr.param_name, siblings_var, indices_var, idx)?);
                 }
             }
         }
@@ -546,11 +559,15 @@ fn emit_range(
     }])
 }
 
+/// `instance_idx` is `Some` when the operand names a public function parameter: its canonical cell
+/// is then copied into the instance column, so the proof is about the value the contract passes and
+/// not about a witness the prover picked.
 fn emit_comparison(
     param_name: &str,
     op: ComparisonOp,
     other: &str,
     num_bits: usize,
+    instance_idx: Option<usize>,
 ) -> Result<Vec<TokenStream>> {
     if !is_simple_ident(other) {
         return Err(ExporterError::Parse(format!(
@@ -568,7 +585,7 @@ fn emit_comparison(
     // both operands are already in [0, 2^num_bits) — otherwise a witness near the field modulus
     // wraps and passes a comparison it should fail. Range-check both operands first (state_mask
     // does the same). copy_advice inside check_range/assert_* ties these to the committed value.
-    Ok(vec![quote! {
+    let mut out = vec![quote! {
         range_chip.check_range(
             layouter.namespace(|| #lhs_range_label),
             #value_cell.clone(),
@@ -585,7 +602,13 @@ fn emit_comparison(
             #other_cell.clone(),
             #num_bits,
         )?;
-    }])
+    }];
+    if let Some(idx) = instance_idx {
+        out.push(quote! {
+            layouter.constrain_instance(#other_cell.cell(), config.instance, #idx)?;
+        });
+    }
+    Ok(out)
 }
 
 fn emit_merkle(
@@ -686,11 +709,9 @@ pub fn emit_descriptor(circuit_name: &str, attrs: &[ResolvedAttr]) -> Result<Str
         format!("Auto-generated descriptor for the '{circuit_name}' privacy-aware circuit.");
 
     let witness_fields_init = emit_witness_schema_fields(attrs)?;
-    let public_inputs_init = emit_public_inputs_schema_fields(attrs);
+    let public_inputs_init = emit_public_inputs_schema_fields(attrs)?;
     let num_witness = count_witness_fields(attrs);
-    // One public input per Poseidon commitment, plus one per Merkle membership (its computed
-    // root is exposed as a public instance — see emit_merkle).
-    let num_public = count_poseidon_commits(attrs) + count_merkle_members(attrs);
+    let num_public = public_input_layout(attrs).len();
     let chips = collect_chip_usage(attrs);
 
     let witness_json_fields = emit_witness_json_fields(attrs);
@@ -1023,6 +1044,48 @@ fn byte_array_literal(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("0x{b:02x}")).collect::<Vec<_>>().join(", ")
 }
 
+/// Solidity-visible type of a public input in the transformed contract's signature.
+fn public_input_param_type(pi: &PublicInput) -> String {
+    match pi {
+        // Commitments and Merkle roots are already field elements in little-endian byte form.
+        PublicInput::Commitment { .. } | PublicInput::MerkleRoot { .. } => "B256".to_string(),
+        // A public function parameter keeps the type it has in the source signature.
+        PublicInput::Param { ty, .. } => ty.trim().to_string(),
+    }
+}
+
+/// Expression converting a public input to the 32-byte little-endian field representation
+/// (`Fr::to_repr()`) the verifier consumes.
+fn public_input_repr_expr(pi: &PublicInput) -> Result<String> {
+    let name = pi.name();
+    let ty = match pi {
+        PublicInput::Commitment { .. } | PublicInput::MerkleRoot { .. } => {
+            return Ok(format!("{name}.0"))
+        }
+        PublicInput::Param { ty, .. } => ty.split("::").last().unwrap_or(ty).trim().to_string(),
+    };
+    let bytes = match ty.as_str() {
+        "u8" => 1,
+        "u16" => 2,
+        "u32" => 4,
+        "u64" => 8,
+        "u128" => 16,
+        "bool" => {
+            return Ok(format!("{{ let mut repr = [0u8; 32]; repr[0] = {name} as u8; repr }}"))
+        }
+        "U256" => return Ok(format!("{name}.to_le_bytes::<32>()")),
+        other => {
+            return Err(ExporterError::Parse(format!(
+                "cannot encode public input '{name}' of type '{other}' as a field element \
+                 (supported: u8/u16/u32/u64/u128/bool/U256)"
+            )))
+        }
+    };
+    Ok(format!(
+        "{{ let mut repr = [0u8; 32]; repr[..{bytes}].copy_from_slice(&{name}.to_le_bytes()); repr }}"
+    ))
+}
+
 fn reserve_param_name(seen: &mut Vec<String>, name: &str) -> Result<()> {
     if seen.iter().any(|n| n == name) {
         return Err(ExporterError::Parse(format!(
@@ -1159,9 +1222,12 @@ pub fn emit_transformed_contract(
     }
 
     // ── Public inputs (instance order) + attestation docs ───────────────────
-    // Mirrors emit_synthesize_body: per attr, bindings sorted by priority; only
-    // Poseidon commitments and Merkle roots contribute instance values.
-    let mut public_input_names: Vec<String> = Vec::new();
+    let layout = public_input_layout(attrs);
+    let public_input_names: Vec<String> = layout.iter().map(PublicInput::name).collect();
+    let index_of = |name: &str| -> usize {
+        public_input_names.iter().position(|n| n == name).expect("name is in the layout")
+    };
+
     let mut attestations: Vec<String> = Vec::new();
     for attr in attrs {
         let mut bindings = attr.bindings.clone();
@@ -1169,8 +1235,8 @@ pub fn emit_transformed_contract(
         for binding in &bindings {
             match binding {
                 GadgetBinding::PoseidonCommit { nonce_var } => {
-                    let idx = public_input_names.len();
-                    public_input_names.push(format!("{}_commitment", attr.param_name));
+                    let name = format!("{}_commitment", attr.param_name);
+                    let idx = index_of(&name);
                     attestations.push(format!(
                         "- `{p}_commitment` = Poseidon({p}, {nonce}) — public input {idx}",
                         p = attr.param_name,
@@ -1181,17 +1247,28 @@ pub fn emit_transformed_contract(
                     let dots = if *inclusive { "..=" } else { ".." };
                     attestations.push(format!("- `{}` ∈ {low}{dots}{high}", attr.param_name));
                 }
-                GadgetBinding::Comparison { op, other, .. } => {
-                    attestations.push(format!(
-                        "- `{p}` {sym} `{other}` — `{other}` is bound as a *private witness*; \
-                         the proof does NOT tie it to any on-chain parameter of the same name",
-                        p = attr.param_name,
-                        sym = op_symbol(*op),
-                    ));
-                }
+                GadgetBinding::Comparison { op, other, operand, .. } => match operand {
+                    OperandBinding::PublicInput { .. } => {
+                        let idx = index_of(other);
+                        attestations.push(format!(
+                            "- `{p}` {sym} `{other}` — public input {idx}, taken from this \
+                             function's `{other}` argument, so the proof holds for the value the \
+                             caller passed and no other",
+                            p = attr.param_name,
+                            sym = op_symbol(*op),
+                        ));
+                    }
+                    OperandBinding::PrivateWitness => {
+                        attestations.push(format!(
+                            "- `{p}` {sym} `{other}` — `{other}` is another `#[zk_private]` \
+                             parameter, anchored by its own commitment",
+                            p = attr.param_name,
+                            sym = op_symbol(*op),
+                        ));
+                    }
+                },
                 GadgetBinding::MerkleMember { root_var, depth, .. } => {
-                    let idx = public_input_names.len();
-                    public_input_names.push(root_var.clone());
+                    let idx = index_of(root_var);
                     attestations.push(format!(
                         "- `{p}_commitment` is a leaf of the Merkle tree rooted at `{root_var}` \
                          (depth {depth}) — public input {idx}",
@@ -1335,10 +1412,13 @@ pub fn emit_transformed_contract(
                 .join(", ")
         )
     };
-    let pi_params =
-        public_input_names.iter().map(|n| format!("{n}: B256")).collect::<Vec<_>>().join(", ");
+    let pi_params = layout
+        .iter()
+        .map(|pi| format!("{}: {}", pi.name(), public_input_param_type(pi)))
+        .collect::<Vec<_>>()
+        .join(", ");
     let pi_exprs =
-        public_input_names.iter().map(|n| format!("{n}.0")).collect::<Vec<_>>().join(", ");
+        layout.iter().map(public_input_repr_expr).collect::<Result<Vec<_>>>()?.join(", ");
     writeln!(w, "/// {pi_doc}").unwrap();
     writeln!(w, "/// Values are forwarded as 32-byte little-endian field representations.")
         .unwrap();
@@ -1569,9 +1649,7 @@ fn emit_witness_json_fields(attrs: &[ResolvedAttr]) -> Vec<TokenStream> {
                     add(nonce_var, FieldKind::Scalar);
                 }
                 GadgetBinding::Comparison { other, .. } => {
-                    if is_simple_ident(other) {
-                        add(other, FieldKind::Scalar);
-                    }
+                    add(other, FieldKind::Scalar);
                 }
                 GadgetBinding::MerkleMember { root_var, siblings_var, indices_var, .. } => {
                     add(root_var, FieldKind::Scalar);
@@ -1639,8 +1717,6 @@ fn emit_build_inputs_body(attrs: &[ResolvedAttr], circuit_ident: &syn::Ident) ->
 
     for attr in attrs {
         push_scalar(&attr.param_name, &mut seen, &mut scalar_parses, &mut circuit_inits);
-        // Iterate bindings in the same priority order as `emit_synthesize_body` so the public
-        // input terms line up with the `constrain_instance` indices emitted there.
         let mut sorted = attr.bindings.clone();
         sorted.sort_by_key(binding_priority);
         for b in &sorted {
@@ -1656,24 +1732,25 @@ fn emit_build_inputs_body(attrs: &[ResolvedAttr], circuit_ident: &syn::Ident) ->
                             #nonce_ident,
                         );
                     });
-                    public_input_terms.push(quote! { #commitment_ident });
                 }
                 GadgetBinding::Comparison { other, .. } => {
-                    if is_simple_ident(other) {
-                        push_scalar(other, &mut seen, &mut scalar_parses, &mut circuit_inits);
-                    }
+                    push_scalar(other, &mut seen, &mut scalar_parses, &mut circuit_inits);
                 }
                 GadgetBinding::MerkleMember { root_var, siblings_var, indices_var, .. } => {
                     push_scalar(root_var, &mut seen, &mut scalar_parses, &mut circuit_inits);
                     push_vec(siblings_var, &mut seen, &mut vec_parses, &mut circuit_inits);
                     push_vec(indices_var, &mut seen, &mut vec_parses, &mut circuit_inits);
-                    // The recomputed Merkle root is a public input (see emit_merkle).
-                    let root_ident = format_ident!("{}", root_var);
-                    public_input_terms.push(quote! { #root_ident });
                 }
                 GadgetBinding::Range { .. } => {}
             }
         }
+    }
+
+    // Build the instance vector from the canonical layout, so the values handed to the
+    // prover/verifier are exactly the cells `emit_synthesize_body` constrained.
+    for entry in public_input_layout(attrs) {
+        let ident = format_ident!("{}", entry.name());
+        public_input_terms.push(quote! { #ident });
     }
 
     let public_inputs_expr = if public_input_terms.is_empty() {
@@ -1694,8 +1771,14 @@ fn emit_build_inputs_body(attrs: &[ResolvedAttr], circuit_ident: &syn::Ident) ->
     }
 }
 
+/// Number of witness fields the schema marks private — the value `NUM_PRIVATE_WITNESSES` carries.
+///
+/// Public comparison operands and Merkle roots travel in the witness document (the prover assigns
+/// their cell) but are bound to the instance column, so they are counted as public inputs, not
+/// private witnesses. Mirrors the visibility `emit_witness_schema_fields` assigns.
 fn count_witness_fields(attrs: &[ResolvedAttr]) -> usize {
     let mut seen = std::collections::BTreeSet::new();
+    let mut public = std::collections::BTreeSet::new();
     for attr in attrs {
         seen.insert(attr.param_name.clone());
         for b in &attr.bindings {
@@ -1703,13 +1786,17 @@ fn count_witness_fields(attrs: &[ResolvedAttr]) -> usize {
                 GadgetBinding::PoseidonCommit { nonce_var } => {
                     seen.insert(nonce_var.clone());
                 }
-                GadgetBinding::Comparison { other, .. } => {
-                    if is_simple_ident(other) {
-                        seen.insert(other.clone());
+                GadgetBinding::Comparison { other, operand, .. } => {
+                    if seen.insert(other.clone())
+                        && matches!(operand, OperandBinding::PublicInput { .. })
+                    {
+                        public.insert(other.clone());
                     }
                 }
                 GadgetBinding::MerkleMember { root_var, siblings_var, indices_var, .. } => {
-                    seen.insert(root_var.clone());
+                    if seen.insert(root_var.clone()) {
+                        public.insert(root_var.clone());
+                    }
                     seen.insert(siblings_var.clone());
                     seen.insert(indices_var.clone());
                 }
@@ -1717,23 +1804,7 @@ fn count_witness_fields(attrs: &[ResolvedAttr]) -> usize {
             }
         }
     }
-    seen.len()
-}
-
-fn count_poseidon_commits(attrs: &[ResolvedAttr]) -> usize {
-    attrs
-        .iter()
-        .flat_map(|a| a.bindings.iter())
-        .filter(|b| matches!(b, GadgetBinding::PoseidonCommit { .. }))
-        .count()
-}
-
-fn count_merkle_members(attrs: &[ResolvedAttr]) -> usize {
-    attrs
-        .iter()
-        .flat_map(|a| a.bindings.iter())
-        .filter(|b| matches!(b, GadgetBinding::MerkleMember { .. }))
-        .count()
+    seen.len() - public.len()
 }
 
 fn field_type_token(ty: &str) -> Result<TokenStream> {
@@ -1779,26 +1850,38 @@ fn emit_witness_schema_fields(attrs: &[ResolvedAttr]) -> Result<Vec<TokenStream>
                         });
                     }
                 }
-                GadgetBinding::Comparison { other, .. } => {
-                    if is_simple_ident(other) && seen.insert(other.clone()) {
-                        let kind = field_type_token(&attr.param_type)?;
+                // A public operand still travels in the witness document (the prover assigns the
+                // cell) but is flagged public: the cell is copied into the instance column.
+                GadgetBinding::Comparison { other, operand, .. } => {
+                    if seen.insert(other.clone()) {
+                        let (kind, visibility) = match operand {
+                            OperandBinding::PublicInput { ty } => {
+                                (field_type_token(ty)?, quote! { FieldVisibility::Public })
+                            }
+                            OperandBinding::PrivateWitness => (
+                                field_type_token(&attr.param_type)?,
+                                quote! { FieldVisibility::Private },
+                            ),
+                        };
                         out.push(quote! {
                             WitnessField {
                                 name: #other.into(),
                                 kind: #kind,
-                                visibility: FieldVisibility::Private,
+                                visibility: #visibility,
                                 description: None,
                             }
                         });
                     }
                 }
                 GadgetBinding::MerkleMember { root_var, siblings_var, indices_var, .. } => {
+                    // The root the prover supplies is checked against the recomputed one, which is
+                    // an instance cell — so it is a public input, not a private witness.
                     if seen.insert(root_var.clone()) {
                         out.push(quote! {
                             WitnessField {
                                 name: #root_var.into(),
                                 kind: FieldType::Fp,
-                                visibility: FieldVisibility::Private,
+                                visibility: FieldVisibility::Public,
                                 description: None,
                             }
                         });
@@ -1838,39 +1921,25 @@ fn emit_witness_schema_fields(attrs: &[ResolvedAttr]) -> Result<Vec<TokenStream>
     Ok(out)
 }
 
-fn emit_public_inputs_schema_fields(attrs: &[ResolvedAttr]) -> Vec<TokenStream> {
+fn emit_public_inputs_schema_fields(attrs: &[ResolvedAttr]) -> Result<Vec<TokenStream>> {
     let mut out = Vec::new();
-    for attr in attrs {
-        // Emit in the same priority order as the instance bindings in emit_synthesize_body.
-        let mut sorted = attr.bindings.clone();
-        sorted.sort_by_key(binding_priority);
-        for b in &sorted {
-            match b {
-                GadgetBinding::PoseidonCommit { .. } => {
-                    let name = format!("{}_commitment", attr.param_name);
-                    out.push(quote! {
-                        PublicInputField {
-                            name: #name.into(),
-                            kind: FieldType::Fp,
-                            description: None,
-                        }
-                    });
-                }
-                GadgetBinding::MerkleMember { root_var, .. } => {
-                    let name = root_var.clone();
-                    out.push(quote! {
-                        PublicInputField {
-                            name: #name.into(),
-                            kind: FieldType::Fp,
-                            description: None,
-                        }
-                    });
-                }
-                _ => {}
+    for entry in public_input_layout(attrs) {
+        let name = entry.name();
+        let kind = match &entry {
+            PublicInput::Commitment { .. } | PublicInput::MerkleRoot { .. } => {
+                quote! { FieldType::Fp }
             }
-        }
+            PublicInput::Param { ty, .. } => field_type_token(ty)?,
+        };
+        out.push(quote! {
+            PublicInputField {
+                name: #name.into(),
+                kind: #kind,
+                description: None,
+            }
+        });
     }
-    out
+    Ok(out)
 }
 
 fn to_pascal_case(s: &str) -> String {
@@ -1892,13 +1961,52 @@ fn to_pascal_case(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::{AttrSpec, CommitScheme, Constraint, MerkleMemberSpec, RangeSpec};
+    use crate::parser::{AttrSpec, CommitScheme, Constraint, FnParam, MerkleMemberSpec, RangeSpec};
     use crate::resolver::resolve;
 
+    fn constraint_operand(c: &Constraint) -> &str {
+        match c {
+            Constraint::Gte(o)
+            | Constraint::Gt(o)
+            | Constraint::Lte(o)
+            | Constraint::Lt(o)
+            | Constraint::Eq(o) => o,
+        }
+    }
+
+    /// Resolve one annotated param against a synthetic signature where every constraint operand is
+    /// a *public* parameter of the same type.
     fn resolved(name: &str, ty: &str, specs: Vec<AttrSpec>) -> ResolvedAttr {
+        resolved_with(name, ty, specs, false)
+    }
+
+    /// Same, but the constraint operands are themselves `#[zk_private]` params.
+    fn resolved_private_operand(name: &str, ty: &str, specs: Vec<AttrSpec>) -> ResolvedAttr {
+        resolved_with(name, ty, specs, true)
+    }
+
+    fn resolved_with(
+        name: &str,
+        ty: &str,
+        specs: Vec<AttrSpec>,
+        operand_is_private: bool,
+    ) -> ResolvedAttr {
         let parsed =
             crate::parser::ZkPrivateAttr { param_name: name.into(), param_type: ty.into(), specs };
-        resolve(&parsed).unwrap()
+        let mut params = vec![FnParam { name: name.into(), ty: ty.into(), is_private: true }];
+        for spec in &parsed.specs {
+            if let AttrSpec::Constraint(c) = spec {
+                let operand = constraint_operand(c);
+                if operand != name && !params.iter().any(|p| p.name == operand) {
+                    params.push(FnParam {
+                        name: operand.into(),
+                        ty: ty.into(),
+                        is_private: operand_is_private,
+                    });
+                }
+            }
+        }
+        resolve(&parsed, &params).unwrap()
     }
 
     fn parse_as_file(src: &str) -> syn::File {
@@ -1969,6 +2077,47 @@ mod tests {
         assert!(src.contains("ComparisonChip"));
         assert!(src.contains("assert_gte"));
         assert!(src.contains("threshold"));
+    }
+
+    /// A constraint operand naming a *public* function parameter must be copied into the instance
+    /// column. Otherwise the prover picks `threshold` freely and proves `collateral >= <anything>`
+    /// while the contract's `threshold` argument binds nothing.
+    #[test]
+    fn public_comparison_operand_is_constrained_to_an_instance_cell() {
+        let attrs = vec![resolved(
+            "collateral",
+            "u64",
+            vec![
+                AttrSpec::Commit(CommitScheme::Poseidon),
+                AttrSpec::Constraint(Constraint::Gte("threshold".into())),
+            ],
+        )];
+        let src = emit_circuit("deposit", &attrs).unwrap();
+        parse_as_file(&src);
+        let normalized = src.replace(' ', "");
+        assert!(
+            normalized
+                .contains("constrain_instance(threshold_value.cell(),config.instance,1usize)"),
+            "threshold must be bound to instance cell 1; got:\n{src}"
+        );
+        // …and the commitment keeps cell 0.
+        assert!(normalized
+            .contains("constrain_instance(collateral_commitment_ref,config.instance,0usize)"));
+    }
+
+    #[test]
+    fn private_comparison_operand_is_not_constrained_to_an_instance_cell() {
+        let attrs = vec![resolved_private_operand(
+            "collateral",
+            "u64",
+            vec![
+                AttrSpec::Commit(CommitScheme::Poseidon),
+                AttrSpec::Constraint(Constraint::Gte("floor".into())),
+            ],
+        )];
+        let src = emit_circuit("deposit", &attrs).unwrap();
+        parse_as_file(&src);
+        assert!(!src.replace(' ', "").contains("constrain_instance(floor_value.cell()"));
     }
 
     #[test]
@@ -2272,6 +2421,30 @@ mod tests {
     }
 
     #[test]
+    fn descriptor_public_inputs_include_a_public_comparison_operand() {
+        let attrs = vec![resolved(
+            "collateral",
+            "u64",
+            vec![
+                AttrSpec::Commit(CommitScheme::Poseidon),
+                AttrSpec::Constraint(Constraint::Gte("threshold".into())),
+            ],
+        )];
+        let src = emit_descriptor("deposit", &attrs).unwrap();
+        parse_as_file(&src);
+        let normalized = src.replace(' ', "");
+        assert!(normalized.contains("NUM_PUBLIC_INPUTS:usize=2usize"));
+        // `threshold` is a public input, so only `collateral` and its nonce are private.
+        assert!(normalized.contains("NUM_PRIVATE_WITNESSES:usize=2usize"));
+        // The instance vector is [commitment, threshold], matching the circuit's cell indices.
+        assert!(
+            normalized.contains("letpublic_inputs=vec![vec![collateral_commitment,threshold]];"),
+            "descriptor must feed threshold to the prover as a public input; got:\n{src}"
+        );
+        assert!(normalized.contains("FieldVisibility::Public"));
+    }
+
+    #[test]
     fn descriptor_no_poseidon_means_no_public_inputs() {
         let attrs = vec![resolved(
             "x",
@@ -2309,6 +2482,31 @@ mod tests {
         assert!(src.contains("\"siblings\""));
         assert!(src.contains("\"indices\""));
         assert!(src.contains("32usize") || src.contains("len : 32"));
+    }
+
+    #[test]
+    fn descriptor_merkle_root_is_public_and_not_counted_as_private() {
+        let attrs = vec![resolved(
+            "leaf",
+            "u64",
+            vec![
+                AttrSpec::Commit(CommitScheme::Poseidon),
+                AttrSpec::MerkleMember(MerkleMemberSpec {
+                    root_var: "root".into(),
+                    siblings_var: "siblings".into(),
+                    indices_var: "indices".into(),
+                }),
+            ],
+        )];
+        let src = emit_descriptor("tx", &attrs).unwrap();
+        parse_as_file(&src);
+        let normalized = src.replace(' ', "");
+        assert!(normalized.contains(
+            "WitnessField{name:\"root\".into(),kind:FieldType::Fp,visibility:FieldVisibility::Public,"
+        ));
+        // leaf, leaf_nonce, siblings, indices — the root is a public input.
+        assert!(normalized.contains("NUM_PRIVATE_WITNESSES:usize=4usize"));
+        assert!(normalized.contains("NUM_PUBLIC_INPUTS:usize=2usize"));
     }
 
     #[test]
@@ -2351,8 +2549,7 @@ mod tests {
     /// Resolve the fn's own `#[zk_private]` attrs and emit, naming the circuit
     /// after the fn — mirrors the `transform_contract` pipeline.
     fn emit_transformed(item_fn: &syn::ItemFn) -> Result<String> {
-        let attrs = crate::parser::parse_fn(item_fn)?;
-        let resolved = crate::resolver::resolve_all(&attrs)?;
+        let resolved = crate::resolver::resolve_fn(item_fn)?;
         emit_transformed_contract(&item_fn.sig.ident.to_string(), item_fn, &resolved)
     }
 
@@ -2514,6 +2711,48 @@ mod tests {
         assert!(src
             .contains("pub fn public_inputs(leaf_commitment: B256, root: B256) -> [[u8; 32]; 2]"));
         assert!(src.contains("merkle_root: root,"));
+    }
+
+    /// The contract must hand the verifier the very `threshold` it was called with, so the proof
+    /// and the call are the same statement.
+    #[test]
+    fn transformed_contract_forwards_public_operand_to_the_verifier() {
+        let item_fn = parse_fn_source(
+            r#"
+            pub fn deposit(
+                #[zk_private(commit = "poseidon", constraint = "value >= threshold")]
+                collateral: u64,
+                threshold: u64,
+            ) -> bool { true }
+            "#,
+        );
+        let src = emit_transformed(&item_fn).unwrap();
+        parse_as_file(&src);
+        assert!(src.contains(
+            "pub fn public_inputs(collateral_commitment: B256, threshold: u64) -> [[u8; 32]; 2]"
+        ));
+        // u64 -> 32-byte little-endian field representation.
+        assert!(src.contains("repr[..8].copy_from_slice(&threshold.to_le_bytes());"));
+        assert!(src.contains(
+            "host.verify_proof(&proof, &public_inputs(collateral_commitment, threshold))"
+        ));
+        assert!(src.contains("public input 1, taken from this function's `threshold` argument"));
+    }
+
+    #[test]
+    fn transformed_contract_encodes_u256_public_operand_little_endian() {
+        let item_fn = parse_fn_source(
+            r#"
+            pub fn deposit(
+                #[zk_private(commit = "poseidon", constraint = "value >= threshold")]
+                collateral: U256,
+                threshold: U256,
+            ) -> bool { true }
+            "#,
+        );
+        let src = emit_transformed(&item_fn).unwrap();
+        parse_as_file(&src);
+        assert!(src.contains("threshold.to_le_bytes::<32>()"));
     }
 
     #[test]

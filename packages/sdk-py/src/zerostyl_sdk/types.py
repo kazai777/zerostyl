@@ -201,10 +201,14 @@ def parse_abi_schema(json_str: str) -> AbiSchema:
             f"circuit.num_public_inputs ({circuit.num_public_inputs}) does not match "
             f"public_inputs.fields length ({len(public_inputs.fields)})"
         )
-    if circuit.num_private_witnesses != len(witness.fields):
+    # `witness.fields` also carries the public inputs the prover has to assign (a comparison
+    # operand taken from a contract argument, for instance), so the count is over the private
+    # fields only — not over the whole list.
+    private_witnesses = sum(1 for f in witness.fields if f.visibility == "private")
+    if circuit.num_private_witnesses != private_witnesses:
         raise ValueError(
             f"circuit.num_private_witnesses ({circuit.num_private_witnesses}) does not match "
-            f"witness.fields length ({len(witness.fields)})"
+            f"the number of private witness.fields ({private_witnesses})"
         )
 
     return AbiSchema(

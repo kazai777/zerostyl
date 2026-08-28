@@ -5,7 +5,9 @@ use zerostyl_circuits::{
 
 use crate::{
     error::{ExporterError, Result},
-    resolver::{GadgetBinding, ResolvedAttr, MERKLE_DEPTH},
+    resolver::{
+        public_input_layout, GadgetBinding, OperandBinding, PublicInput, ResolvedAttr, MERKLE_DEPTH,
+    },
     schema::{AbiSchema, CircuitMetadata, ProofMetadata, ProvingSystem},
     version::ABI_VERSION,
 };
@@ -19,7 +21,7 @@ pub fn from_descriptor(desc: &dyn CircuitDescriptor) -> AbiSchema {
 
 pub fn from_attrs(circuit_name: &str, attrs: &[ResolvedAttr]) -> Result<AbiSchema> {
     let witness = build_witness_schema(attrs)?;
-    let public_inputs = build_public_inputs_schema(attrs);
+    let public_inputs = build_public_inputs_schema(attrs)?;
     Ok(AbiSchema {
         abi_version: ABI_VERSION,
         circuit: CircuitMetadata {
@@ -30,7 +32,7 @@ pub fn from_attrs(circuit_name: &str, attrs: &[ResolvedAttr]) -> Result<AbiSchem
             ),
             default_k: GENERATED_DESCRIPTOR_DEFAULT_K,
             num_public_inputs: public_inputs.fields.len(),
-            num_private_witnesses: witness.fields.len(),
+            num_private_witnesses: count_private(&witness),
         },
         witness,
         public_inputs,
@@ -47,6 +49,12 @@ pub fn emit_abi_json(circuit_name: &str, attrs: &[ResolvedAttr]) -> Result<Strin
     let schema = from_attrs(circuit_name, attrs)?;
     serde_json::to_string_pretty(&schema)
         .map_err(|e| ExporterError::Other(format!("AbiSchema serialization failed: {e}")))
+}
+
+/// Witness fields the schema marks private. Public operands stay in `witness.fields` — the prover
+/// needs them to assign their cell — but they are counted as public inputs instead.
+fn count_private(witness: &WitnessSchema) -> usize {
+    witness.fields.iter().filter(|f| f.visibility == FieldVisibility::Private).count()
 }
 
 fn field_type_from(ty: &str) -> Result<FieldType> {
@@ -87,22 +95,34 @@ fn build_witness_schema(attrs: &[ResolvedAttr]) -> Result<WitnessSchema> {
                         });
                     }
                 }
-                GadgetBinding::Comparison { other, .. } => {
-                    if is_simple_ident(other) && seen.insert(other.clone()) {
+                // A public operand still travels in the witness document (the prover assigns the
+                // cell) but is flagged public: the cell is copied into the instance column.
+                GadgetBinding::Comparison { other, operand, .. } => {
+                    if seen.insert(other.clone()) {
+                        let (kind, visibility) = match operand {
+                            OperandBinding::PublicInput { ty } => {
+                                (field_type_from(ty)?, FieldVisibility::Public)
+                            }
+                            OperandBinding::PrivateWitness => {
+                                (field_type_from(&attr.param_type)?, FieldVisibility::Private)
+                            }
+                        };
                         fields.push(WitnessField {
                             name: other.clone(),
-                            kind: field_type_from(&attr.param_type)?,
-                            visibility: FieldVisibility::Private,
+                            kind,
+                            visibility,
                             description: None,
                         });
                     }
                 }
                 GadgetBinding::MerkleMember { root_var, siblings_var, indices_var, .. } => {
+                    // The root the prover supplies is checked against the recomputed one, which is
+                    // an instance cell — so it is a public input, not a private witness.
                     if seen.insert(root_var.clone()) {
                         fields.push(WitnessField {
                             name: root_var.clone(),
                             kind: FieldType::Fp,
-                            visibility: FieldVisibility::Private,
+                            visibility: FieldVisibility::Public,
                             description: None,
                         });
                     }
@@ -136,53 +156,18 @@ fn build_witness_schema(attrs: &[ResolvedAttr]) -> Result<WitnessSchema> {
     Ok(WitnessSchema { fields })
 }
 
-// Priority mirrors codegen::binding_priority so the ABI public-input order matches the order in
-// which the generated circuit binds them to instance columns (Poseidon commitment before the
-// Merkle root).
-fn public_input_priority(b: &GadgetBinding) -> u8 {
-    match b {
-        GadgetBinding::PoseidonCommit { .. } => 0,
-        GadgetBinding::Range { .. } => 1,
-        GadgetBinding::Comparison { .. } => 2,
-        GadgetBinding::MerkleMember { .. } => 3,
-    }
-}
-
-fn build_public_inputs_schema(attrs: &[ResolvedAttr]) -> PublicInputsSchema {
+/// Mirrors `resolver::public_input_layout`, the single source of truth for the instance column, so
+/// the ABI lists exactly the cells the generated circuit constrains, in the same order.
+fn build_public_inputs_schema(attrs: &[ResolvedAttr]) -> Result<PublicInputsSchema> {
     let mut fields = Vec::new();
-    for attr in attrs {
-        let mut sorted = attr.bindings.clone();
-        sorted.sort_by_key(public_input_priority);
-        for b in &sorted {
-            match b {
-                GadgetBinding::PoseidonCommit { .. } => {
-                    fields.push(PublicInputField {
-                        name: format!("{}_commitment", attr.param_name),
-                        kind: FieldType::Fp,
-                        description: None,
-                    });
-                }
-                // The Merkle membership exposes its recomputed root as a public input so the
-                // verifier checks the path against a root it supplies (see codegen::emit_merkle).
-                GadgetBinding::MerkleMember { root_var, .. } => {
-                    fields.push(PublicInputField {
-                        name: root_var.clone(),
-                        kind: FieldType::Fp,
-                        description: None,
-                    });
-                }
-                _ => {}
-            }
-        }
+    for entry in public_input_layout(attrs) {
+        let kind = match &entry {
+            PublicInput::Commitment { .. } | PublicInput::MerkleRoot { .. } => FieldType::Fp,
+            PublicInput::Param { ty, .. } => field_type_from(ty)?,
+        };
+        fields.push(PublicInputField { name: entry.name(), kind, description: None });
     }
-    PublicInputsSchema { fields }
-}
-
-fn is_simple_ident(s: &str) -> bool {
-    let trimmed = s.trim();
-    !trimmed.is_empty()
-        && trimmed.chars().next().map(|c| c.is_ascii_alphabetic() || c == '_').unwrap_or(false)
-        && trimmed.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    Ok(PublicInputsSchema { fields })
 }
 
 #[cfg(test)]
@@ -307,13 +292,25 @@ mod tests {
         assert_eq!(abi, back);
     }
 
-    use crate::parser::{AttrSpec, CommitScheme, Constraint, MerkleMemberSpec, RangeSpec};
+    use crate::parser::{AttrSpec, CommitScheme, Constraint, FnParam, MerkleMemberSpec, RangeSpec};
     use crate::resolver::resolve;
 
-    fn resolved(name: &str, ty: &str, specs: Vec<AttrSpec>) -> ResolvedAttr {
+    /// Resolve one annotated param; `extra` declares the rest of the enclosing signature.
+    fn resolved_with(
+        name: &str,
+        ty: &str,
+        specs: Vec<AttrSpec>,
+        extra: Vec<FnParam>,
+    ) -> ResolvedAttr {
         let parsed =
             crate::parser::ZkPrivateAttr { param_name: name.into(), param_type: ty.into(), specs };
-        resolve(&parsed).unwrap()
+        let mut params = vec![FnParam { name: name.into(), ty: ty.into(), is_private: true }];
+        params.extend(extra);
+        resolve(&parsed, &params).unwrap()
+    }
+
+    fn resolved(name: &str, ty: &str, specs: Vec<AttrSpec>) -> ResolvedAttr {
+        resolved_with(name, ty, specs, vec![])
     }
 
     #[test]
@@ -352,16 +349,73 @@ mod tests {
     }
 
     #[test]
-    fn from_attrs_comparison_adds_other_witness() {
-        let attrs = vec![resolved(
+    fn from_attrs_public_comparison_operand_becomes_a_public_input() {
+        let attrs = vec![resolved_with(
             "value",
             "u64",
             vec![AttrSpec::Constraint(Constraint::Gte("threshold".into()))],
+            vec![FnParam { name: "threshold".into(), ty: "u64".into(), is_private: false }],
         )];
         let abi = from_attrs("compare", &attrs).unwrap();
-        let names: Vec<&str> = abi.witness.fields.iter().map(|f| f.name.as_str()).collect();
-        assert!(names.contains(&"value"));
-        assert!(names.contains(&"threshold"));
+
+        // `threshold` is what the caller passes to the contract: it must be an instance cell, not a
+        // witness the prover is free to pick.
+        let public_names: Vec<&str> =
+            abi.public_inputs.fields.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(public_names, vec!["threshold"]);
+        assert_eq!(abi.circuit.num_public_inputs, 1);
+
+        // It still travels in the witness document (the prover must assign the cell), flagged
+        // public so consumers know it is verifier-visible.
+        assert_eq!(abi.witness.fields.len(), 2);
+        let threshold = abi.witness.fields.iter().find(|f| f.name == "threshold").unwrap();
+        assert_eq!(threshold.visibility, FieldVisibility::Public);
+        let value = abi.witness.fields.iter().find(|f| f.name == "value").unwrap();
+        assert_eq!(value.visibility, FieldVisibility::Private);
+
+        // …and it does not inflate the private-witness count: only `value` is private.
+        assert_eq!(abi.circuit.num_private_witnesses, 1);
+    }
+
+    #[test]
+    fn from_attrs_private_comparison_operand_stays_a_private_witness() {
+        let attrs = vec![resolved_with(
+            "value",
+            "u64",
+            vec![AttrSpec::Constraint(Constraint::Gte("other".into()))],
+            vec![FnParam { name: "other".into(), ty: "u64".into(), is_private: true }],
+        )];
+        let abi = from_attrs("compare", &attrs).unwrap();
+        assert!(abi.public_inputs.fields.is_empty());
+        let other = abi.witness.fields.iter().find(|f| f.name == "other").unwrap();
+        assert_eq!(other.visibility, FieldVisibility::Private);
+
+        // A genuinely private operand does count towards num_private_witnesses.
+        assert_eq!(abi.witness.fields.len(), 2);
+        assert_eq!(abi.circuit.num_private_witnesses, 2);
+    }
+
+    #[test]
+    fn from_attrs_num_private_witnesses_counts_only_private_fields() {
+        let attrs = vec![resolved_with(
+            "collateral",
+            "u64",
+            vec![
+                AttrSpec::Commit(CommitScheme::Poseidon),
+                AttrSpec::Constraint(Constraint::Gte("threshold".into())),
+            ],
+            vec![FnParam { name: "threshold".into(), ty: "u64".into(), is_private: false }],
+        )];
+        let abi = from_attrs("deposit", &attrs).unwrap();
+
+        assert_eq!(abi.witness.fields.len(), 3);
+        assert_eq!(abi.circuit.num_private_witnesses, 2);
+        assert_eq!(abi.circuit.num_public_inputs, 2);
+        assert_eq!(
+            abi.circuit.num_private_witnesses,
+            abi.witness.fields.iter().filter(|f| f.visibility == FieldVisibility::Private).count()
+        );
+        assert_eq!(abi.circuit.num_public_inputs, abi.public_inputs.fields.len());
     }
 
     #[test]
@@ -418,6 +472,41 @@ mod tests {
         let names: Vec<&str> = abi.public_inputs.fields.iter().map(|f| f.name.as_str()).collect();
         // Order must match the circuit's instance bindings: commitment (idx 0), root (idx 1).
         assert_eq!(names, vec!["leaf_commitment", "root"]);
+    }
+
+    #[test]
+    fn from_attrs_merkle_root_is_a_public_witness_field() {
+        let attrs = vec![resolved(
+            "leaf",
+            "U256",
+            vec![
+                AttrSpec::Commit(CommitScheme::Poseidon),
+                AttrSpec::MerkleMember(MerkleMemberSpec {
+                    root_var: "root".into(),
+                    siblings_var: "siblings".into(),
+                    indices_var: "indices".into(),
+                }),
+            ],
+        )];
+        let abi = from_attrs("claim", &attrs).unwrap();
+
+        // The root stays in the witness document — the prover assigns its cell — but it is checked
+        // against the recomputed root bound to the instance column, so it is public.
+        let root = abi.witness.fields.iter().find(|f| f.name == "root").unwrap();
+        assert_eq!(root.visibility, FieldVisibility::Public);
+        assert!(abi.public_inputs.fields.iter().any(|f| f.name == "root"));
+
+        // …and it must not be counted as a private witness: leaf, leaf_nonce, siblings, indices.
+        assert_eq!(abi.witness.fields.len(), 5);
+        assert_eq!(abi.circuit.num_private_witnesses, 4);
+        let private: Vec<&str> = abi
+            .witness
+            .fields
+            .iter()
+            .filter(|f| f.visibility == FieldVisibility::Private)
+            .map(|f| f.name.as_str())
+            .collect();
+        assert_eq!(private, vec!["leaf", "leaf_nonce", "siblings", "indices"]);
     }
 
     #[test]

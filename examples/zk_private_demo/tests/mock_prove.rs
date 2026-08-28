@@ -1,4 +1,4 @@
-use zerostyl_circuits::{register_circuit, Registry};
+use zerostyl_circuits::{register_circuit, FieldVisibility, Registry};
 use zk_private_demo::descriptor;
 
 const K: u32 = 10;
@@ -42,8 +42,9 @@ fn descriptor_metadata_matches_codegen() {
     let d = descriptor();
     assert_eq!(d.name(), "deposit");
     assert_eq!(d.version(), "1.0.0");
-    assert_eq!(d.num_public_inputs(), 1);
-    assert_eq!(d.num_private_witnesses(), 3);
+    assert_eq!(d.num_public_inputs(), 2);
+    // `threshold` rides in the witness document but is a public input, so it is not counted here.
+    assert_eq!(d.num_private_witnesses(), 2);
 
     let witness_schema = d.witness_schema();
     assert_eq!(witness_schema.fields.len(), 3);
@@ -51,10 +52,22 @@ fn descriptor_metadata_matches_codegen() {
     assert!(names.contains(&"collateral"));
     assert!(names.contains(&"threshold"));
     assert!(names.contains(&"collateral_nonce"));
+    // `threshold` still travels in the witness document — the prover has to assign the cell — but
+    // it is verifier-visible, not private.
+    let threshold = witness_schema.fields.iter().find(|f| f.name == "threshold").unwrap();
+    assert_eq!(threshold.visibility, FieldVisibility::Public);
+    let collateral = witness_schema.fields.iter().find(|f| f.name == "collateral").unwrap();
+    assert_eq!(collateral.visibility, FieldVisibility::Private);
 
     let pub_schema = d.public_inputs_schema();
-    assert_eq!(pub_schema.fields.len(), 1);
-    assert!(pub_schema.fields[0].name.contains("commitment"));
+    let pub_names: Vec<&str> = pub_schema.fields.iter().map(|f| f.name.as_str()).collect();
+    assert_eq!(pub_names, vec!["collateral_commitment", "threshold"]);
+
+    assert_eq!(d.num_public_inputs(), pub_schema.fields.len());
+    assert_eq!(
+        d.num_private_witnesses(),
+        witness_schema.fields.iter().filter(|f| f.visibility == FieldVisibility::Private).count()
+    );
 }
 
 #[test]

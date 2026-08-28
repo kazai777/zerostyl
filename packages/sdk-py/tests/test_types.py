@@ -98,6 +98,41 @@ def test_rejects_witness_count_mismatch():
         parse_abi_schema(json.dumps(data))
 
 
+def sample_abi_with_public_witness() -> dict:
+    """Two private witnesses plus one public one (a comparison operand the contract supplies).
+
+    The public field stays in ``witness.fields`` — the prover still has to assign its cell — but
+    only the private ones count towards ``num_private_witnesses``.
+    """
+    data = sample_abi()
+    data["circuit"]["num_public_inputs"] = 2
+    data["witness"]["fields"].append(
+        {"name": "threshold", "kind": {"type": "u64"}, "visibility": "public"}
+    )
+    data["public_inputs"]["fields"].append({"name": "threshold", "kind": {"type": "u64"}})
+    return data
+
+
+def test_accepts_public_witness_field_not_counted_as_private():
+    abi = parse_abi_schema(json.dumps(sample_abi_with_public_witness()))
+    assert len(abi.witness.fields) == 3
+    assert abi.circuit.num_private_witnesses == 2
+
+
+def test_rejects_private_count_below_the_number_of_private_fields():
+    data = sample_abi_with_public_witness()
+    data["circuit"]["num_private_witnesses"] = 1
+    with pytest.raises(ValueError, match="num_private_witnesses"):
+        parse_abi_schema(json.dumps(data))
+
+
+def test_rejects_private_count_that_includes_the_public_field():
+    data = sample_abi_with_public_witness()
+    data["circuit"]["num_private_witnesses"] = 3
+    with pytest.raises(ValueError, match="num_private_witnesses"):
+        parse_abi_schema(json.dumps(data))
+
+
 def test_rejects_malformed_json():
     with pytest.raises(ValueError, match="not valid JSON"):
         parse_abi_schema("{not json")

@@ -19,6 +19,7 @@ alloy-primitives = "=0.8.20"
 
 [dev-dependencies]
 zerostyl-runtime = { path = "../../crates/zerostyl-runtime" }
+tempfile = "3"
 
 [lib]
 path = "src/lib.rs"

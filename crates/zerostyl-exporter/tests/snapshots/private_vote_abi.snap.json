@@ -6,7 +6,7 @@
     "description": "Anonymous voting: balance commitment, boolean vote, eligibility via balance ≥ threshold.",
     "default_k": 11,
     "num_public_inputs": 3,
-    "num_private_witnesses": 5
+    "num_private_witnesses": 4
   },
   "witness": {
     "fields": [

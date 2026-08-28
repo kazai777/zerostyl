@@ -24,7 +24,7 @@ const DESCRIPTION: &str =
     "Private token transfer: balance conservation + Poseidon commitments + Merkle membership.";
 const DEFAULT_K: u32 = 14;
 const NUM_PUBLIC_INPUTS: usize = 4;
-const NUM_PRIVATE_WITNESSES: usize = 6;
+const NUM_PRIVATE_WITNESSES: usize = 7;
 
 #[derive(Debug, Deserialize)]
 struct WitnessJson {
@@ -452,7 +452,7 @@ mod tests {
         assert_eq!(d.name(), "tx_privacy");
         assert_eq!(d.default_k(), 14);
         assert_eq!(d.num_public_inputs(), 4);
-        assert_eq!(d.num_private_witnesses(), 6);
+        assert_eq!(d.num_private_witnesses(), 7);
     }
 
     #[test]

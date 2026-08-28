@@ -27,7 +27,7 @@ const DESCRIPTION: &str =
     "Privacy-preserving state proof: Poseidon commitment + bounded range + balance comparison.";
 const DEFAULT_K: u32 = 10;
 const NUM_PUBLIC_INPUTS: usize = 2;
-const NUM_PRIVATE_WITNESSES: usize = 5;
+const NUM_PRIVATE_WITNESSES: usize = 4;
 
 #[derive(Debug, Deserialize)]
 struct WitnessJson {
@@ -395,7 +395,7 @@ mod tests {
         assert_eq!(d.version(), "1.0.0");
         assert_eq!(d.default_k(), 10);
         assert_eq!(d.num_public_inputs(), 2);
-        assert_eq!(d.num_private_witnesses(), 5);
+        assert_eq!(d.num_private_witnesses(), 4);
     }
 
     #[test]

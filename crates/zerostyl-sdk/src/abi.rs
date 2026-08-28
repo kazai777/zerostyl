@@ -3,7 +3,7 @@
 use std::fs;
 use std::path::Path;
 
-use zerostyl_circuits::{AbiSchema, ABI_VERSION};
+use zerostyl_circuits::{AbiSchema, FieldVisibility, ABI_VERSION};
 
 use crate::error::{Result, SdkError};
 
@@ -34,11 +34,16 @@ fn validate(schema: &AbiSchema) -> Result<()> {
             schema.public_inputs.fields.len()
         )));
     }
-    if schema.circuit.num_private_witnesses != schema.witness.fields.len() {
+    // `witness.fields` also carries the public inputs the prover has to assign (a comparison
+    // operand taken from a contract argument, for instance), so the count is over the private
+    // fields only — not over the whole list.
+    let private_witnesses =
+        schema.witness.fields.iter().filter(|f| f.visibility == FieldVisibility::Private).count();
+    if schema.circuit.num_private_witnesses != private_witnesses {
         return Err(SdkError::Abi(format!(
-            "circuit.num_private_witnesses ({}) does not match witness.fields length ({})",
+            "circuit.num_private_witnesses ({}) does not match the number of private \
+             witness.fields ({private_witnesses})",
             schema.circuit.num_private_witnesses,
-            schema.witness.fields.len()
         )));
     }
     if schema.circuit.name.is_empty() {
@@ -119,6 +124,68 @@ mod tests {
     fn rejects_witness_count_mismatch() {
         let mut schema = sample();
         schema.circuit.num_private_witnesses = 0;
+        let json = serde_json::to_string(&schema).unwrap();
+        let err = load_abi_str(&json).unwrap_err();
+        assert!(format!("{err}").contains("num_private_witnesses"));
+    }
+
+    /// Two private witnesses and one public one (a comparison operand the contract supplies).
+    /// The public field stays in `witness.fields` — the prover still has to assign its cell — but
+    /// only the private ones count towards `num_private_witnesses`.
+    fn sample_with_public_witness() -> AbiSchema {
+        let mut schema = sample();
+        schema.circuit.num_private_witnesses = 2;
+        schema.circuit.num_public_inputs = 2;
+        schema.witness.fields = vec![
+            WitnessField {
+                name: "collateral".into(),
+                kind: FieldType::U64,
+                visibility: FieldVisibility::Private,
+                description: None,
+            },
+            WitnessField {
+                name: "collateral_nonce".into(),
+                kind: FieldType::Fp,
+                visibility: FieldVisibility::Private,
+                description: None,
+            },
+            WitnessField {
+                name: "threshold".into(),
+                kind: FieldType::U64,
+                visibility: FieldVisibility::Public,
+                description: None,
+            },
+        ];
+        schema.public_inputs.fields.push(PublicInputField {
+            name: "threshold".into(),
+            kind: FieldType::U64,
+            description: None,
+        });
+        schema
+    }
+
+    #[test]
+    fn accepts_public_witness_field_not_counted_as_private() {
+        let schema = sample_with_public_witness();
+        let json = serde_json::to_string(&schema).unwrap();
+        let loaded = load_abi_str(&json).expect("2 private + 1 public witness must validate");
+        assert_eq!(loaded.witness.fields.len(), 3);
+        assert_eq!(loaded.circuit.num_private_witnesses, 2);
+    }
+
+    #[test]
+    fn rejects_private_count_below_the_number_of_private_fields() {
+        let mut schema = sample_with_public_witness();
+        schema.circuit.num_private_witnesses = 1;
+        let json = serde_json::to_string(&schema).unwrap();
+        let err = load_abi_str(&json).unwrap_err();
+        assert!(format!("{err}").contains("num_private_witnesses"));
+    }
+
+    #[test]
+    fn rejects_private_count_that_includes_the_public_field() {
+        let mut schema = sample_with_public_witness();
+        schema.circuit.num_private_witnesses = 3;
         let json = serde_json::to_string(&schema).unwrap();
         let err = load_abi_str(&json).unwrap_err();
         assert!(format!("{err}").contains("num_private_witnesses"));

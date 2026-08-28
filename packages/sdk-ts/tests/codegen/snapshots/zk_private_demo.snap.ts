@@ -6,8 +6,8 @@ export const DepositCircuit = {
   name: "deposit",
   version: "1.0.0",
   defaultK: 10,
-  numPublicInputs: 1,
-  numPrivateWitnesses: 3,
+  numPublicInputs: 2,
+  numPrivateWitnesses: 2,
 } as const;
 
 export interface DepositWitness {
@@ -18,4 +18,5 @@ export interface DepositWitness {
 
 export interface DepositPublicInputs {
   collateral_commitment: Hex;
+  threshold: bigint;
 }

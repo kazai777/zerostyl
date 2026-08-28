@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use syn::ItemFn;
 use zerostyl_exporter::{
     emit_abi_json, emit_circuit, emit_descriptor, emit_transformed_contract, format_rust,
-    parser::parse_fn, resolver::resolve_all,
+    resolver::resolve_fn,
 };
 
 fn fixtures_dir() -> PathBuf {
@@ -40,8 +40,7 @@ fn snapshot_for(fixture: &str, circuit_name: &str) {
     let source = fs::read_to_string(fixtures_dir().join(format!("{fixture}.rs.in")))
         .expect("fixture readable");
     let item_fn = extract_fn(&source);
-    let attrs = parse_fn(&item_fn).expect("parse_fn");
-    let resolved = resolve_all(&attrs).expect("resolve_all");
+    let resolved = resolve_fn(&item_fn).expect("resolve_fn");
 
     let circuit_src = pretty(&emit_circuit(circuit_name, &resolved).expect("emit_circuit"));
     let descriptor_src =
