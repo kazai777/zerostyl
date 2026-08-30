@@ -24,7 +24,7 @@ postcard = { version = "1.1", default-features = false, features = ["alloc"] }
 blake2 = { version = "0.10", default-features = false }
 
 # Stylus SDK (optional, enabled with "stylus" feature)
-stylus-sdk = { version = "0.9", optional = true }
+stylus-sdk = { version = "0.10", optional = true }
 alloy-primitives = { version = "0.8.20", default-features = false, optional = true }
 mini-alloc = { version = "0.9", optional = true }
 
